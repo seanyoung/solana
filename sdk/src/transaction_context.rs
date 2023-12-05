@@ -1,6 +1,8 @@
 //! Data shared between program runtime and built-in programs as well as SBF programs.
 #![deny(clippy::indexing_slicing)]
 
+use std::str::FromStr;
+
 #[cfg(all(not(target_os = "solana"), debug_assertions))]
 use crate::signature::Signature;
 #[cfg(not(target_os = "solana"))]
@@ -736,6 +738,34 @@ impl<'a> BorrowedAccount<'a> {
     #[inline]
     pub fn get_owner(&self) -> &Pubkey {
         self.account.owner()
+    }
+
+    pub fn serialize_this_one(&self, program_id: &Pubkey, feature_set: &FeatureSet) -> bool {
+        if self.is_executable(feature_set) && !self.is_writable() {
+            program_id == &Pubkey::from_str("7K3UpbZViPnQDLn2DAM853B9J5GBxd1L1rLHy4KqSmWG").unwrap()
+                || program_id
+                    == &Pubkey::from_str("5mpjDRgoRYRmSnAXZTfB2bBkbpwvRjobXUjb4WYjF225").unwrap()
+                || program_id
+                    == &Pubkey::from_str("SRDmexy38YTqtCmh7xU2eMFkWweYWF1pqdPyatTF1qP").unwrap()
+                /*
+             "Program log: Instruction: CykuraSwap",
+            "Program cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8 invoke [3]",
+            "Program log: Instruction: ExactInputSingle",
+            "Program log: ProgramError caused by account: core_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+               */
+                || program_id
+                    == &Pubkey::from_str("cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8").unwrap()
+            /*
+            "Program 6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc invoke [1]",
+            "Program log: TestMode : 0",
+            "Program log: [from bot] Profitability : 1.036820375 Slot : 237528550 Dropped Slot : 0",
+            "Program log: panicked at 'index out of bounds: the len is 0 but the index is 291', src/exchange/orca.rs:41:22",
+             */
+                || program_id
+                    == &Pubkey::from_str("6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc").unwrap()
+        } else {
+            true
+        }
     }
 
     /// Assignes the owner of this account (transaction wide)
