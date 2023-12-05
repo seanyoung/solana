@@ -1,6 +1,8 @@
 //! Data shared between program runtime and built-in programs as well as SBF programs.
 #![deny(clippy::indexing_slicing)]
 
+use std::str::FromStr;
+
 #[cfg(all(not(target_os = "solana"), debug_assertions))]
 use crate::signature::Signature;
 #[cfg(not(target_os = "solana"))]
@@ -735,6 +737,18 @@ impl<'a> BorrowedAccount<'a> {
     #[inline]
     pub fn get_owner(&self) -> &Pubkey {
         self.account.owner()
+    }
+
+    pub fn serialize_this_one(&self, program_id: &Pubkey) -> bool {
+        if self.is_executable() && !self.is_writable() {
+            program_id == &Pubkey::from_str("7K3UpbZViPnQDLn2DAM853B9J5GBxd1L1rLHy4KqSmWG").unwrap()
+                || program_id
+                    == &Pubkey::from_str("5mpjDRgoRYRmSnAXZTfB2bBkbpwvRjobXUjb4WYjF225").unwrap()
+                || program_id
+                    == &Pubkey::from_str("SRDmexy38YTqtCmh7xU2eMFkWweYWF1pqdPyatTF1qP").unwrap()
+        } else {
+            true
+        }
     }
 
     /// Assignes the owner of this account (transaction wide)

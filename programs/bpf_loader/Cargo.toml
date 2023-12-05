@@ -21,6 +21,7 @@ solana-sdk = { workspace = true }
 solana-zk-token-sdk = { workspace = true }
 solana_rbpf = { workspace = true }
 thiserror = { workspace = true }
+pretty-hex = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

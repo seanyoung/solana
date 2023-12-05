@@ -22,7 +22,7 @@ use {
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct BankHashDetails {
+pub struct BankHashDetails {
     /// client version
     pub version: String,
     pub account_data_encoding: String,
@@ -101,7 +101,7 @@ impl TryFrom<&Bank> for BankHashDetails {
 
 // Wrap the Vec<...> so we can implement custom Serialize/Deserialize traits on the wrapper type
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct BankHashAccounts {
+pub struct BankHashAccounts {
     pub accounts: Vec<PubkeyHashAccount>,
 }
 

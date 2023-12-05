@@ -92,22 +92,34 @@ impl Serializer {
 
     fn write_account(
         &mut self,
+        program_id: &Pubkey,
         account: &mut BorrowedAccount<'_>,
     ) -> Result<u64, InstructionError> {
         let vm_data_addr = if self.copy_account_data {
             let vm_data_addr = self.vaddr.saturating_add(self.buffer.len() as u64);
-            self.write_all(account.get_data());
+            if !account.serialize_this_one(program_id) {
+                self.write_all(&[]);
+            } else {
+                self.write_all(account.get_data());
+            }
             vm_data_addr
         } else {
             self.push_region(true);
             let vaddr = self.vaddr;
-            self.push_account_data_region(account)?;
+            self.push_account_data_region(program_id, account)?;
             vaddr
         };
 
         if self.aligned {
-            let align_offset =
-                (account.get_data().len() as *const u8).align_offset(BPF_ALIGN_OF_U128);
+            let data_len = if !account.serialize_this_one(program_id) {
+                0
+            } else {
+                account.get_data().len()
+            };
+            let align_offset = (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
+            if data_len == 0 {
+                assert_eq!(align_offset, 0);
+            }
             if self.copy_account_data {
                 self.fill_write(MAX_PERMITTED_DATA_INCREASE + align_offset, 0)
                     .map_err(|_| InstructionError::InvalidArgument)?;
@@ -130,11 +142,18 @@ impl Serializer {
 
     fn push_account_data_region(
         &mut self,
+        program_id: &Pubkey,
         account: &mut BorrowedAccount<'_>,
     ) -> Result<(), InstructionError> {
         if !account.get_data().is_empty() {
             let region = match account_data_region_memory_state(account) {
-                MemoryState::Readable => MemoryRegion::new_readonly(account.get_data(), self.vaddr),
+                MemoryState::Readable => {
+                    if !account.serialize_this_one(program_id) {
+                        MemoryRegion::new_readonly(&[], self.vaddr)
+                    } else {
+                        MemoryRegion::new_readonly(account.get_data(), self.vaddr)
+                    }
+                }
                 MemoryState::Writable => {
                     MemoryRegion::new_writable(account.get_data_mut()?, self.vaddr)
                 }
@@ -199,6 +218,8 @@ pub fn serialize_parameters(
     ),
     InstructionError,
 > {
+    assert!(copy_account_data);
+
     let num_ix_accounts = instruction_context.get_number_of_instruction_accounts();
     if num_ix_accounts > MAX_INSTRUCTION_ACCOUNTS as IndexOfAccount {
         return Err(InstructionError::MaxAccountsExceeded);
@@ -309,7 +330,7 @@ fn serialize_parameters_unaligned(
                 + size_of::<Pubkey>() // owner
                 + size_of::<u8>() // executable
                 + size_of::<u64>(); // rent_epoch
-                if copy_account_data {
+                if copy_account_data && account.serialize_this_one(program_id) {
                     size += account.get_data().len();
                 }
             }
@@ -335,8 +356,12 @@ fn serialize_parameters_unaligned(
                 s.write::<u8>(account.is_writable() as u8);
                 let vm_key_addr = s.write_all(account.get_key().as_ref());
                 let vm_lamports_addr = s.write::<u64>(account.get_lamports().to_le());
-                s.write::<u64>((account.get_data().len() as u64).to_le());
-                let vm_data_addr = s.write_account(&mut account)?;
+                if !account.serialize_this_one(program_id) {
+                    s.write::<u64>(0u64.to_le());
+                } else {
+                    s.write::<u64>((account.get_data().len() as u64).to_le());
+                }
+                let vm_data_addr = s.write_account(program_id, &mut account)?;
                 let vm_owner_addr = s.write_all(account.get_owner().as_ref());
                 s.write::<u8>(account.is_executable() as u8);
                 s.write::<u64>((account.get_rent_epoch()).to_le());
@@ -370,6 +395,9 @@ pub fn deserialize_parameters_unaligned<I: IntoIterator<Item = usize>>(
         .get_number_of_instruction_accounts())
         .zip(account_lengths.into_iter())
     {
+        let program_id = instruction_context
+            .get_last_program_key(transaction_context)
+            .unwrap();
         let duplicate =
             instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
         start += 1; // is_dup
@@ -389,7 +417,7 @@ pub fn deserialize_parameters_unaligned<I: IntoIterator<Item = usize>>(
             }
             start += size_of::<u64>() // lamports
                 + size_of::<u64>(); // data length
-            if copy_account_data {
+            if copy_account_data && borrowed_account.serialize_this_one(program_id) {
                 let data = buffer
                     .get(start..start + pre_len)
                     .ok_or(InstructionError::InvalidArgument)?;
@@ -445,7 +473,9 @@ fn serialize_parameters_aligned(
                 + MAX_PERMITTED_DATA_INCREASE
                 + size_of::<u64>(); // rent epoch
                 if copy_account_data {
-                    size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
+                    if account.serialize_this_one(program_id) {
+                        size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
+                    }
                 } else {
                     size += BPF_ALIGN_OF_U128;
                 }
@@ -471,8 +501,12 @@ fn serialize_parameters_aligned(
                 let vm_key_addr = s.write_all(borrowed_account.get_key().as_ref());
                 let vm_owner_addr = s.write_all(borrowed_account.get_owner().as_ref());
                 let vm_lamports_addr = s.write::<u64>(borrowed_account.get_lamports().to_le());
-                s.write::<u64>((borrowed_account.get_data().len() as u64).to_le());
-                let vm_data_addr = s.write_account(&mut borrowed_account)?;
+                if !borrowed_account.serialize_this_one(program_id) {
+                    s.write::<u64>(0u64.to_le());
+                } else {
+                    s.write::<u64>((borrowed_account.get_data().len() as u64).to_le());
+                }
+                let vm_data_addr = s.write_account(program_id, &mut borrowed_account)?;
                 s.write::<u64>((borrowed_account.get_rent_epoch()).to_le());
                 accounts_metadata.push(SerializedAccountMetadata {
                     original_data_len: borrowed_account.get_data().len(),
@@ -494,6 +528,7 @@ fn serialize_parameters_aligned(
     s.write_all(program_id.as_ref());
 
     let (mem, regions) = s.finish();
+
     Ok((mem, regions, accounts_metadata))
 }
 
@@ -509,6 +544,9 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
         .get_number_of_instruction_accounts())
         .zip(account_lengths.into_iter())
     {
+        let program_id = instruction_context
+            .get_last_program_key(transaction_context)
+            .unwrap();
         let duplicate =
             instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
         start += size_of::<u8>(); // position
@@ -517,6 +555,7 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
         } else {
             let mut borrowed_account = instruction_context
                 .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
+
             start += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
@@ -535,11 +574,15 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
                 borrowed_account.set_lamports(lamports)?;
             }
             start += size_of::<u64>(); // lamports
-            let post_len = LittleEndian::read_u64(
+            let mut post_len = LittleEndian::read_u64(
                 buffer
                     .get(start..)
                     .ok_or(InstructionError::InvalidArgument)?,
             ) as usize;
+            if !borrowed_account.serialize_this_one(program_id) {
+                assert_eq!(post_len, 0);
+                post_len = pre_len;
+            }
             start += size_of::<u64>(); // data length
             if post_len.saturating_sub(pre_len) > MAX_PERMITTED_DATA_INCREASE
                 || post_len > MAX_PERMITTED_DATA_LENGTH as usize
@@ -547,21 +590,28 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
                 return Err(InstructionError::InvalidRealloc);
             }
             // The redundant check helps to avoid the expensive data comparison if we can
-            let alignment_offset = (pre_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
-            if copy_account_data {
-                let data = buffer
-                    .get(start..start + post_len)
-                    .ok_or(InstructionError::InvalidArgument)?;
-                match borrowed_account
-                    .can_data_be_resized(post_len)
-                    .and_then(|_| borrowed_account.can_data_be_changed())
-                {
-                    Ok(()) => borrowed_account.set_data_from_slice(data)?,
-                    Err(err) if borrowed_account.get_data() != data => return Err(err),
-                    _ => {}
-                }
-                start += pre_len; // data
+            let alignment_offset = (if !borrowed_account.serialize_this_one(program_id) {
+                0
             } else {
+                pre_len
+            } as *const u8)
+                .align_offset(BPF_ALIGN_OF_U128);
+            if copy_account_data {
+                if borrowed_account.serialize_this_one(program_id) {
+                    let data = buffer
+                        .get(start..start + post_len)
+                        .ok_or(InstructionError::InvalidArgument)?;
+                    match borrowed_account
+                        .can_data_be_resized(post_len)
+                        .and_then(|_| borrowed_account.can_data_be_changed())
+                    {
+                        Ok(()) => borrowed_account.set_data_from_slice(data)?,
+                        Err(err) if borrowed_account.get_data() != data => return Err(err),
+                        _ => {}
+                    }
+                    start += pre_len; // data
+                }
+            } else if borrowed_account.serialize_this_one(program_id) {
                 // See Serializer::write_account() as to why we have this
                 // padding before the realloc region here.
                 start += BPF_ALIGN_OF_U128.saturating_sub(alignment_offset);
