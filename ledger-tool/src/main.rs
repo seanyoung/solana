@@ -44,7 +44,7 @@ use {
             AccessType, BlockstoreRecoveryMode, LedgerColumnOptions,
             BLOCKSTORE_DIRECTORY_ROCKS_FIFO,
         },
-        blockstore_processor::ProcessOptions,
+        blockstore_processor::{ProcessOptions, ProcessSlotCallback},
         shred::Shred,
         use_snapshot_archives_at_startup::{self, UseSnapshotArchivesAtStartup},
     },
@@ -96,7 +96,7 @@ use {
         str::FromStr,
         sync::{
             atomic::{AtomicBool, Ordering},
-            Arc, RwLock,
+            Arc, Mutex, RwLock,
         },
         time::{Duration, UNIX_EPOCH},
     },
@@ -1712,7 +1712,22 @@ fn main() {
                              information that went into computing the completed bank's bank hash. \
                              The file will be written within <LEDGER_DIR>/bank_hash_details/",
                         ),
-                ),
+                )
+                .arg(
+                    Arg::with_name("verify_slots")
+                        .long("verify-slots")
+                        .takes_value(true)
+                        .value_name("FILENAME")
+                        .help("Record slots to new file or verify slots match contents of existing file.")
+                )
+                .arg(
+                    Arg::with_name("verify_slots_details")
+                        .long("verify-slots-details")
+                        .possible_values(&["none", "bank"])
+                        .default_value("none")
+                        .takes_value(true)
+                        .help("In the slot recording, include bank details or not")
+                )
         )
         .subcommand(
             SubCommand::with_name("graph")
@@ -2704,6 +2719,81 @@ fn main() {
                     );
                 }
 
+                let include_bank = match arg_matches.value_of("verify_slots_details").unwrap() {
+                    "none" => false,
+                    "bank" => true,
+                    _ => unreachable!(),
+                };
+
+                let (slot_callback, record_slots_file, recorded_slots) = if let Some(filename) =
+                    arg_matches.value_of_os("verify_slots")
+                {
+                    let filename = Path::new(filename);
+
+                    if filename.exists() {
+                        let file = File::open(filename).unwrap_or_else(|err| {
+                            eprintln!("Unable to read file: {}: {err:#}", filename.display());
+                            exit(1);
+                        });
+
+                        let details: bank_hash_details::BankHashDetails =
+                            serde_json::from_reader(file).unwrap_or_else(|err| {
+                                eprintln!("Error loading slots file: {err:#}");
+                                exit(1);
+                            });
+
+                        let slots = Arc::new(Mutex::new(details.bank_hash_details));
+
+                        let slot_callback = Arc::new(move |bank: &Bank| {
+                            let bank_hash_details::BankHashSlotDetails {
+                                slot: expected_slot,
+                                bank_hash: expected_hash,
+                                ..
+                            } = slots.lock().unwrap().remove(0);
+                            if bank.slot() != expected_slot
+                                || bank.hash().to_string() != expected_hash
+                            {
+                                error!("Expected slot: {expected_slot} hash: {expected_hash} got slot: {} hash: {}",
+                                    bank.slot(), bank.hash());
+                            }
+                        });
+
+                        (Some(slot_callback as ProcessSlotCallback), None, None)
+                    } else {
+                        let file = File::create(filename).unwrap_or_else(|err| {
+                            eprintln!("Unable to write to file: {}: {:#}", filename.display(), err);
+                            exit(1);
+                        });
+
+                        let slot_hashes = Arc::new(Mutex::new(Vec::new()));
+
+                        let slot_callback = Arc::new({
+                            let slots = Arc::clone(&slot_hashes);
+                            move |bank: &Bank| {
+                                let slot_details = if include_bank {
+                                    bank_hash_details::BankHashSlotDetails::try_from(bank).unwrap()
+                                } else {
+                                    bank_hash_details::BankHashSlotDetails {
+                                        slot: bank.slot(),
+                                        bank_hash: bank.hash().to_string(),
+                                        ..Default::default()
+                                    }
+                                };
+
+                                slots.lock().unwrap().push(slot_details);
+                            }
+                        });
+
+                        (
+                            Some(slot_callback as ProcessSlotCallback),
+                            Some(file),
+                            Some(slot_hashes),
+                        )
+                    }
+                } else {
+                    (None, None, None)
+                };
+
                 let process_options = ProcessOptions {
                     new_hard_forks: hardforks_of(arg_matches, "hard_forks"),
                     run_verification: !(arg_matches.is_present("skip_poh_verify")
@@ -2731,6 +2821,7 @@ fn main() {
                         use_snapshot_archives_at_startup::cli::NAME,
                         UseSnapshotArchivesAtStartup
                     ),
+                    slot_callback,
                     ..ProcessOptions::default()
                 };
                 let print_accounts_stats = arg_matches.is_present("print_accounts_stats");
@@ -2766,6 +2857,21 @@ fn main() {
                         })
                         .ok();
                 }
+
+                if let Some(recorded_slots_file) = record_slots_file {
+                    if let Ok(recorded_slots) = recorded_slots.clone().unwrap().lock() {
+                        let bank_hashes =
+                            bank_hash_details::BankHashDetails::new(recorded_slots.to_vec());
+
+                        // writing the json file ends up with a syscall for each number, comma, indentation etc.
+                        // use BufWriter to speed things up
+
+                        let writer = std::io::BufWriter::new(recorded_slots_file);
+
+                        serde_json::to_writer_pretty(writer, &bank_hashes).unwrap();
+                    }
+                }
+
                 exit_signal.store(true, Ordering::Relaxed);
                 system_monitor_service.join().unwrap();
             }

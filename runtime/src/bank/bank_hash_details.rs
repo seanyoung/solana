@@ -22,7 +22,7 @@ use {
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct BankHashDetails {
+pub struct BankHashDetails {
     /// The client version
     pub version: String,
     /// The encoding format for account data buffers
@@ -66,8 +66,8 @@ impl BankHashDetails {
 }
 
 /// The components that go into a bank hash calculation for a single bank/slot.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct BankHashSlotDetails {
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Default)]
+pub struct BankHashSlotDetails {
     pub slot: Slot,
     pub bank_hash: String,
     pub parent_bank_hash: String,
@@ -141,8 +141,8 @@ impl TryFrom<&Bank> for BankHashSlotDetails {
 
 /// Wrapper around a Vec<_> to facilitate custom Serialize/Deserialize trait
 /// implementations.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct BankHashAccounts {
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct BankHashAccounts {
     pub accounts: Vec<PubkeyHashAccount>,
 }
 

@@ -74,7 +74,7 @@ impl TransactionExecutionResult {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionExecutionDetails {
     pub status: transaction::Result<()>,
     pub log_messages: Option<Vec<String>>,
@@ -87,7 +87,7 @@ pub struct TransactionExecutionDetails {
     pub accounts_data_len_delta: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DurableNonceFee {
     Valid(u64),
     Invalid,
