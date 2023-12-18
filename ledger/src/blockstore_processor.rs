@@ -594,8 +594,9 @@ pub enum BlockstoreProcessorError {
     RootBankWithMismatchedCapitalization(Slot),
 }
 
-/// Callback for accessing bank state while processing the blockstore
-pub type ProcessCallback = Arc<dyn Fn(&Bank) + Sync + Send>;
+/// Callback for accessing bank state after each slot is confirmed while
+/// processing the blockstore
+pub type ProcessSlotCallback = Arc<dyn Fn(&Bank) + Sync + Send>;
 
 #[derive(Default, Clone)]
 pub struct ProcessOptions {
@@ -603,6 +604,7 @@ pub struct ProcessOptions {
     pub run_verification: bool,
     pub full_leader_cache: bool,
     pub halt_at_slot: Option<Slot>,
+    pub slot_callback: Option<ProcessSlotCallback>,
     pub new_hard_forks: Option<Vec<Slot>>,
     pub debug_keys: Option<Arc<HashSet<Pubkey>>>,
     pub account_indexes: AccountSecondaryIndexes,
@@ -1715,6 +1717,11 @@ fn process_single_slot(
     })?;
 
     bank.freeze(); // all banks handled by this routine are created from complete slots
+
+    if let Some(slot_callback) = &opts.slot_callback {
+        slot_callback(bank);
+    }
+
     if blockstore.is_primary_access() {
         blockstore.insert_bank_hash(bank.slot(), bank.hash(), false);
     }
@@ -1737,10 +1744,12 @@ pub struct TransactionStatusBatch {
     pub token_balances: TransactionTokenBalancesSet,
     pub rent_debits: Vec<RentDebits>,
     pub transaction_indexes: Vec<usize>,
+    pub bank_hash: Option<Hash>,
 }
 
 #[derive(Clone)]
 pub struct TransactionStatusSender {
+    pub bank_hash: bool,
     pub sender: Sender<TransactionStatusMessage>,
 }
 
@@ -1756,6 +1765,8 @@ impl TransactionStatusSender {
         transaction_indexes: Vec<usize>,
     ) {
         let slot = bank.slot();
+
+        let hash = self.bank_hash.then(|| bank.hash_internal_state());
 
         if let Err(e) = self
             .sender
@@ -1773,6 +1784,7 @@ impl TransactionStatusSender {
                 token_balances,
                 rent_debits,
                 transaction_indexes,
+                bank_hash: hash,
             }))
         {
             trace!(
@@ -4251,6 +4263,7 @@ pub mod tests {
         let (transaction_status_sender, transaction_status_receiver) =
             crossbeam_channel::unbounded();
         let transaction_status_sender = TransactionStatusSender {
+            bank_hash: false,
             sender: transaction_status_sender,
         };
 

@@ -69,7 +69,7 @@ impl TransactionExecutionResult {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionExecutionDetails {
     pub status: transaction::Result<()>,
     pub log_messages: Option<Vec<String>>,
@@ -82,7 +82,7 @@ pub struct TransactionExecutionDetails {
     pub accounts_data_len_delta: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DurableNonceFee {
     Valid(u64),
     Invalid,
@@ -110,7 +110,7 @@ impl DurableNonceFee {
 /// transaction instruction
 pub type InnerInstructions = Vec<InnerInstruction>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InnerInstruction {
     pub instruction: CompiledInstruction,
     /// Invocation stack height of this instruction. Instruction stack height

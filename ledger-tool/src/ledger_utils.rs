@@ -70,6 +70,7 @@ pub fn load_and_process_ledger(
     blockstore: Arc<Blockstore>,
     process_options: ProcessOptions,
     snapshot_archive_path: Option<PathBuf>,
+    transaction_status_sender: Option<TransactionStatusSender>,
     incremental_snapshot_archive_path: Option<PathBuf>,
 ) -> Result<(Arc<RwLock<BankForks>>, Option<StartingSnapshotHashes>), BlockstoreProcessorError> {
     let bank_snapshots_dir = if blockstore.is_primary_access() {
@@ -327,12 +328,13 @@ pub fn load_and_process_ledger(
             );
             (
                 Some(TransactionStatusSender {
+                    bank_hash: false,
                     sender: transaction_status_sender,
                 }),
                 Some(transaction_status_service),
             )
         } else {
-            (None, None)
+            (transaction_status_sender, None)
         };
 
     let result = blockstore_processor::process_blockstore_from_root(
@@ -352,6 +354,8 @@ pub fn load_and_process_ledger(
     accounts_hash_verifier.join().unwrap();
     if let Some(service) = transaction_status_service {
         service.join().unwrap();
+    } else if let Some(transaction_status_sender) = transaction_status_sender {
+        drop(transaction_status_sender.sender);
     }
 
     result

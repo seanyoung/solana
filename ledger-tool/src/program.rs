@@ -126,6 +126,7 @@ fn load_blockstore(ledger_path: &Path, arg_matches: &ArgMatches<'_>) -> Arc<Bank
         Arc::new(blockstore),
         process_options,
         snapshot_archive_path,
+        None,
         incremental_snapshot_archive_path,
     )
     .unwrap_or_else(|err| {

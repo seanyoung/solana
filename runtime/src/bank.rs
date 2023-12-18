@@ -6960,7 +6960,7 @@ impl Bank {
 
     /// Hash the `accounts` HashMap. This represents a validator's interpretation
     ///  of the delta of the ledger since the last vote and up to now
-    fn hash_internal_state(&self) -> Hash {
+    pub fn hash_internal_state(&self) -> Hash {
         let slot = self.slot();
         let ignore = (!self.is_partitioned_rewards_feature_enabled()
             && (self

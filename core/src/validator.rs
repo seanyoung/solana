@@ -2159,6 +2159,7 @@ fn initialize_rpc_transaction_history_services(
     let max_complete_transaction_status_slot = Arc::new(AtomicU64::new(blockstore.max_root()));
     let (transaction_status_sender, transaction_status_receiver) = unbounded();
     let transaction_status_sender = Some(TransactionStatusSender {
+        bank_hash: false,
         sender: transaction_status_sender,
     });
     let transaction_status_service = Some(TransactionStatusService::new(
