@@ -19,6 +19,7 @@ use {
     solana_accounts_db::{
         accounts::Accounts, accounts_db::CalcAccountsHashDataSource, accounts_index::ScanConfig,
         hardened_unpack::MAX_GENESIS_ARCHIVE_UNPACKED_SIZE,
+        transaction_results::TransactionExecutionDetails,
     },
     solana_clap_utils::{
         hidden_unless_forced,
@@ -44,7 +45,7 @@ use {
             AccessType, BlockstoreRecoveryMode, LedgerColumnOptions,
             BLOCKSTORE_DIRECTORY_ROCKS_FIFO,
         },
-        blockstore_processor::ProcessOptions,
+        blockstore_processor::{ProcessOptions, TransactionStatusSender},
         shred::Shred,
         use_snapshot_archives_at_startup::{self, UseSnapshotArchivesAtStartup},
     },
@@ -1064,6 +1065,11 @@ fn get_access_type(process_options: &ProcessOptions) -> AccessType {
 
 #[cfg(not(target_env = "msvc"))]
 use jemallocator::Jemalloc;
+use {
+    serde::Deserialize,
+    solana_ledger::blockstore_processor::{ProcessSlotCallback, TransactionStatusMessage},
+    std::{collections::VecDeque, sync::Mutex},
+};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -1712,7 +1718,22 @@ fn main() {
                              information that went into computing the completed bank's bank hash. \
                              The file will be written within <LEDGER_DIR>/bank_hash_details/",
                         ),
-                ),
+                )
+                .arg(
+                    Arg::with_name("verify_slots")
+                        .long("verify-slots")
+                        .takes_value(true)
+                        .value_name("FILENAME")
+                        .help("Record slots to new file or verify slots match contents of existing file.")
+                )
+                .arg(
+                    Arg::with_name("verify_slots_details")
+                        .long("verify-slots-details")
+                        .possible_values(&["none", "bank", "tx", "bank-tx"])
+                        .default_value("none")
+                        .takes_value(true)
+                        .help("In the slot recording, include bank and tx details or not")
+                )
         )
         .subcommand(
             SubCommand::with_name("graph")
@@ -2427,6 +2448,7 @@ fn main() {
                     Arc::new(blockstore),
                     process_options,
                     snapshot_archive_path,
+                    None,
                     incremental_snapshot_archive_path,
                 );
 
@@ -2507,6 +2529,7 @@ fn main() {
                     Arc::new(blockstore),
                     process_options,
                     snapshot_archive_path,
+                    None,
                     incremental_snapshot_archive_path,
                 );
                 println!("{}", &bank_forks.read().unwrap().working_bank().hash());
@@ -2704,6 +2727,129 @@ fn main() {
                     );
                 }
 
+                let (include_bank, include_tx) =
+                    match arg_matches.value_of("verify_slots_details").unwrap() {
+                        "none" => (false, false),
+                        "bank" => (true, false),
+                        "tx" => (false, true),
+                        "bank-tx" => (true, true),
+                        _ => unreachable!(),
+                    };
+
+                #[derive(Serialize, Deserialize)]
+                struct TransactionBatch {
+                    bank_hash: String,
+                    transactions: Vec<Transaction>,
+                }
+
+                #[derive(Serialize, Deserialize, Default, Clone)]
+                struct Transaction {
+                    index: usize,
+                    accounts: Vec<String>,
+                    instructions: Vec<Instruction>,
+                    is_simple_vote_tx: bool,
+                    execution_results: Option<TransactionExecutionDetails>,
+                }
+
+                #[derive(Serialize, Deserialize, Clone)]
+                struct Instruction {
+                    program_id: String,
+                    accounts: Vec<String>,
+                    data: String,
+                }
+
+                #[derive(Serialize, Deserialize)]
+                struct SlotDetails {
+                    slot: Slot,
+                    hash: String,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    details: Option<bank_hash_details::BankHashDetails>,
+                    #[serde(skip_serializing_if = "Vec::is_empty")]
+                    #[serde(default = "Vec::new")]
+                    transactions: Vec<TransactionBatch>,
+                }
+
+                let (slot_callback, record_slots_file, recorded_slots) = if let Some(filename) =
+                    arg_matches.value_of_os("verify_slots")
+                {
+                    let filename = Path::new(filename);
+
+                    if filename.exists() {
+                        let file = File::open(filename).unwrap_or_else(|err| {
+                            eprintln!("Unable to read file: {}: {err:#}", filename.display());
+                            exit(1);
+                        });
+
+                        let slots: Arc<Mutex<VecDeque<SlotDetails>>> = Arc::new(Mutex::new(
+                            serde_json::from_reader(file).unwrap_or_else(|err| {
+                                eprintln!("Error loading slots file: {err:#}");
+                                exit(1);
+                            }),
+                        ));
+
+                        let slot_callback = Arc::new(move |bank: &Bank| {
+                            let SlotDetails {
+                                slot: expected_slot,
+                                hash: expected_hash,
+                                ..
+                            } = slots.lock().unwrap().pop_front().unwrap();
+                            if bank.slot() != expected_slot
+                                || bank.hash().to_string() != expected_hash
+                            {
+                                error!("Expected slot: {expected_slot} hash: {expected_hash} got slot: {} hash: {}",
+                                    bank.slot(), bank.hash());
+                            }
+                        });
+
+                        (Some(slot_callback as ProcessSlotCallback), None, None)
+                    } else {
+                        let file = File::create(filename).unwrap_or_else(|err| {
+                            eprintln!("Unable to write to file: {}: {:#}", filename.display(), err);
+                            exit(1);
+                        });
+
+                        let slot_hashes = Arc::new(Mutex::new(Vec::new()));
+
+                        let slot_callback = Arc::new({
+                            let slots = Arc::clone(&slot_hashes);
+                            move |bank: &Bank| {
+                                let details = include_bank.then_some(
+                                    bank_hash_details::BankHashDetails::try_from(bank).unwrap(),
+                                );
+
+                                slots.lock().unwrap().push(SlotDetails {
+                                    slot: bank.slot(),
+                                    hash: bank.hash().to_string(),
+                                    details,
+                                    transactions: Vec::new(),
+                                });
+                            }
+                        });
+
+                        (
+                            Some(slot_callback as ProcessSlotCallback),
+                            Some(file),
+                            Some(slot_hashes),
+                        )
+                    }
+                } else {
+                    (None, None, None)
+                };
+
+                let (sender, receiver) = if include_tx {
+                    let (sender, receiver) = crossbeam_channel::unbounded();
+
+                    (
+                        Some(TransactionStatusSender {
+                            bank_hash: true,
+                            sender,
+                        }),
+                        Some(receiver),
+                    )
+                } else {
+                    (None, None)
+                };
+
                 let process_options = ProcessOptions {
                     new_hard_forks: hardforks_of(arg_matches, "hard_forks"),
                     run_verification: !(arg_matches.is_present("skip_poh_verify")
@@ -2731,6 +2877,7 @@ fn main() {
                         use_snapshot_archives_at_startup::cli::NAME,
                         UseSnapshotArchivesAtStartup
                     ),
+                    slot_callback,
                     ..ProcessOptions::default()
                 };
                 let print_accounts_stats = arg_matches.is_present("print_accounts_stats");
@@ -2751,6 +2898,7 @@ fn main() {
                     Arc::new(blockstore),
                     process_options,
                     snapshot_archive_path,
+                    sender,
                     incremental_snapshot_archive_path,
                 );
 
@@ -2766,6 +2914,96 @@ fn main() {
                         })
                         .ok();
                 }
+
+                if let Some(recorded_slots_file) = record_slots_file {
+                    if let Ok(mut recorded_slots) = recorded_slots.clone().unwrap().lock() {
+                        if let Some(recv) = receiver {
+                            for tsm in recv {
+                                if let TransactionStatusMessage::Batch(batch) = tsm {
+                                    let slot = batch.bank.slot();
+
+                                    assert_eq!(
+                                        batch.transactions.len(),
+                                        batch.execution_results.len()
+                                    );
+
+                                    let mut transactions: Vec<_> = batch
+                                        .transactions
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(no, tx)| {
+                                            let message = tx.message();
+
+                                            let accounts: Vec<String> = message
+                                                .account_keys()
+                                                .iter()
+                                                .map(|acc| acc.to_string())
+                                                .collect();
+
+                                            let instructions = message
+                                                .instructions()
+                                                .iter()
+                                                .map(|ix| {
+                                                    let program_id = accounts
+                                                        [ix.program_id_index as usize]
+                                                        .clone();
+
+                                                    let accounts = ix
+                                                        .accounts
+                                                        .iter()
+                                                        .map(|idx| accounts[*idx as usize].clone())
+                                                        .collect();
+
+                                                    let data = hex::encode(&ix.data);
+
+                                                    Instruction {
+                                                        program_id,
+                                                        accounts,
+                                                        data,
+                                                    }
+                                                })
+                                                .collect();
+
+                                            let execution_results =
+                                                batch.execution_results[no].clone();
+
+                                            let is_simple_vote_tx = tx.is_simple_vote_transaction();
+
+                                            Transaction {
+                                                accounts,
+                                                instructions,
+                                                is_simple_vote_tx,
+                                                execution_results,
+                                                index: batch.transaction_indexes[no],
+                                            }
+                                        })
+                                        .collect();
+
+                                    transactions.sort_by(|a, b| a.index.cmp(&b.index));
+
+                                    let batch = TransactionBatch {
+                                        bank_hash: batch.bank_hash.unwrap().to_string(),
+                                        transactions,
+                                    };
+
+                                    if let Some(recorded_slot) =
+                                        recorded_slots.iter_mut().find(|f| f.slot == slot)
+                                    {
+                                        recorded_slot.transactions.push(batch);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // writing the json file ends up with a syscall for each number, comma, indentation etc.
+                    // use BufWriter to speed things up
+
+                    let writer = std::io::BufWriter::new(recorded_slots_file);
+
+                    serde_json::to_writer_pretty(writer, &recorded_slots.unwrap()).unwrap();
+                }
+
                 exit_signal.store(true, Ordering::Relaxed);
                 system_monitor_service.join().unwrap();
             }
@@ -2807,6 +3045,7 @@ fn main() {
                     Arc::new(blockstore),
                     process_options,
                     snapshot_archive_path,
+                    None,
                     incremental_snapshot_archive_path,
                 );
 
@@ -2986,6 +3225,7 @@ fn main() {
                     blockstore.clone(),
                     process_options,
                     snapshot_archive_path,
+                    None,
                     incremental_snapshot_archive_path,
                 );
                 let mut bank = bank_forks
@@ -3353,6 +3593,7 @@ fn main() {
                     Arc::new(blockstore),
                     process_options,
                     snapshot_archive_path,
+                    None,
                     incremental_snapshot_archive_path,
                 );
 
@@ -3443,6 +3684,7 @@ fn main() {
                     Arc::new(blockstore),
                     process_options,
                     snapshot_archive_path,
+                    None,
                     incremental_snapshot_archive_path,
                 );
                 let bank_forks = bank_forks.read().unwrap();

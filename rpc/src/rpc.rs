@@ -4619,6 +4619,7 @@ pub fn populate_blockstore_for_tests(
             entries,
             Some(
                 &solana_ledger::blockstore_processor::TransactionStatusSender {
+                    bank_hash: false,
                     sender: transaction_status_sender,
                 },
             ),

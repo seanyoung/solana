@@ -1680,6 +1680,7 @@ mod tests {
             let (replay_vote_sender, _replay_vote_receiver) = unbounded();
             let committer = Committer::new(
                 Some(TransactionStatusSender {
+                    bank_hash: false,
                     sender: transaction_status_sender,
                 }),
                 replay_vote_sender,
@@ -1825,6 +1826,7 @@ mod tests {
             let (replay_vote_sender, _replay_vote_receiver) = unbounded();
             let committer = Committer::new(
                 Some(TransactionStatusSender {
+                    bank_hash: false,
                     sender: transaction_status_sender,
                 }),
                 replay_vote_sender,

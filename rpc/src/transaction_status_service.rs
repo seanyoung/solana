@@ -73,6 +73,7 @@ impl TransactionStatusService {
                 token_balances,
                 rent_debits,
                 transaction_indexes,
+                ..
             }) => {
                 let slot = bank.slot();
                 for (
@@ -416,6 +417,7 @@ pub(crate) mod tests {
             token_balances,
             rent_debits: vec![rent_debits],
             transaction_indexes: vec![transaction_index],
+            bank_hash: None,
         };
 
         let test_notifier = Arc::new(TestTransactionNotifier::new());
