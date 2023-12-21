@@ -2736,12 +2736,6 @@ fn main() {
                         _ => unreachable!(),
                     };
 
-                #[derive(Serialize, Deserialize)]
-                struct TransactionBatch {
-                    bank_hash: String,
-                    transactions: Vec<Transaction>,
-                }
-
                 #[derive(Serialize, Deserialize, Default, Clone)]
                 struct Transaction {
                     index: usize,
@@ -2766,7 +2760,7 @@ fn main() {
                     details: Option<bank_hash_details::BankHashDetails>,
                     #[serde(skip_serializing_if = "Vec::is_empty")]
                     #[serde(default = "Vec::new")]
-                    transactions: Vec<TransactionBatch>,
+                    transactions: Vec<Transaction>,
                 }
 
                 let (slot_callback, record_slots_file, recorded_slots) = if let Some(filename) =
@@ -2927,7 +2921,7 @@ fn main() {
                                         batch.execution_results.len()
                                     );
 
-                                    let mut transactions: Vec<_> = batch
+                                    let transactions: Vec<_> = batch
                                         .transactions
                                         .iter()
                                         .enumerate()
@@ -2979,17 +2973,14 @@ fn main() {
                                         })
                                         .collect();
 
-                                    transactions.sort_by(|a, b| a.index.cmp(&b.index));
-
-                                    let batch = TransactionBatch {
-                                        bank_hash: batch.bank_hash.unwrap().to_string(),
-                                        transactions,
-                                    };
-
                                     if let Some(recorded_slot) =
                                         recorded_slots.iter_mut().find(|f| f.slot == slot)
                                     {
-                                        recorded_slot.transactions.push(batch);
+                                        recorded_slot.transactions.extend(transactions);
+
+                                        recorded_slot
+                                            .transactions
+                                            .sort_by(|a, b| a.index.cmp(&b.index));
                                     }
                                 }
                             }
