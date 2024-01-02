@@ -22,7 +22,7 @@ use {
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct BankHashDetails {
+pub struct BankHashDetails {
     /// client version
     pub version: String,
     /// The encoding format for account data buffers
@@ -67,7 +67,7 @@ impl BankHashDetails {
 
 /// The components that go into a bank hash calculation for a single bank/slot.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct BankHashSlotDetails {
+pub struct BankHashSlotDetails {
     pub slot: Slot,
     pub bank_hash: String,
     pub parent_bank_hash: String,

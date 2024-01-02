@@ -2757,7 +2757,7 @@ fn main() {
                     slot: Slot,
                     hash: String,
                     #[serde(skip_serializing_if = "Option::is_none")]
-                    details: Option<bank_hash_details::BankHashDetails>,
+                    details: Option<bank_hash_details::BankHashSlotDetails>,
                     #[serde(skip_serializing_if = "Vec::is_empty")]
                     #[serde(default = "Vec::new")]
                     transactions: Vec<Transaction>,
@@ -2807,8 +2807,8 @@ fn main() {
                         let slot_callback = Arc::new({
                             let slots = Arc::clone(&slot_hashes);
                             move |bank: &Bank| {
-                                let details = include_bank.then_some(
-                                    bank_hash_details::BankHashDetails::try_from(bank).unwrap(),
+                                let details: Option<bank_hash_details::BankHashSlotDetails> = include_bank.then_some(
+                                    bank_hash_details::BankHashSlotDetails::try_from(bank).unwrap(),
                                 );
 
                                 slots.lock().unwrap().push(SlotDetails {
