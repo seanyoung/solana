@@ -2737,9 +2737,10 @@ fn main() {
                         let slot_callback = Arc::new({
                             let slots = Arc::clone(&slot_hashes);
                             move |bank: &Bank| {
-                                let details = include_bank.then_some(
-                                    bank_hash_details::BankHashDetails::try_from(bank).unwrap(),
-                                );
+                                let details: Option<bank_hash_details::BankHashDetails> =
+                                    include_bank.then_some(
+                                        bank_hash_details::BankHashDetails::try_from(bank).unwrap(),
+                                    );
 
                                 slots.lock().unwrap().push(SlotDetails {
                                     slot: bank.slot(),
