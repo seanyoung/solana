@@ -760,6 +760,14 @@ pub mod deprecate_executable_meta_update_in_bpf_loader {
     solana_sdk::declare_id!("k6uR1J9VtKJnTukBV2Eo15BEy434MBg8bT6hHQgmU8v");
 }
 
+pub mod dont_serialize_executable_accounts {
+    solana_sdk::declare_id!("SeanGLG9chXD7bUF42nxUkyhhasZ38RauPFSK5txEkE");
+}
+
+pub mod dont_serialize_executable_accounts_exceptions {
+    solana_sdk::declare_id!("Seanx5tafZesNtxNeayrDHj5WFyzfCnsDse2ucj6ATz");
+}
+
 lazy_static! {
     /// Map of feature identifiers to user-visible description
     pub static ref FEATURE_NAMES: HashMap<Pubkey, &'static str> = [
@@ -945,6 +953,8 @@ lazy_static! {
         (merkle_conflict_duplicate_proofs::id(), "generate duplicate proofs for merkle root conflicts #34270"),
         (disable_bpf_loader_instructions::id(), "disable bpf loader management instructions #34194"),
         (deprecate_executable_meta_update_in_bpf_loader::id(), "deprecate executable meta flag update in bpf loader #34194"),
+        (dont_serialize_executable_accounts::id(), "executable ro accounts should not be serialized"),
+        (dont_serialize_executable_accounts_exceptions::id(), "executable ro accounts should not be serialized program_id exceptions"),
         /*************** ADD NEW FEATURES HERE ***************/
     ]
     .iter()

@@ -18,7 +18,7 @@ use {
 use {
     crate::{
         account::{is_builtin, is_executable, AccountSharedData, ReadableAccount},
-        feature_set::FeatureSet,
+        feature_set::{self, FeatureSet},
         instruction::InstructionError,
         pubkey::Pubkey,
     },
@@ -712,6 +712,34 @@ pub struct BorrowedAccount<'a> {
     account: RefMut<'a, AccountSharedData>,
 }
 
+// Mainnet-beta program_ids that cannot deal with serializing executable accounts zero-length
+solana_sdk::pubkeys!(
+    program_ids_exe_zero_length_exceptions,
+    [
+        "7K3UpbZViPnQDLn2DAM853B9J5GBxd1L1rLHy4KqSmWG",
+        "5mpjDRgoRYRmSnAXZTfB2bBkbpwvRjobXUjb4WYjF225",
+        "SRDmexy38YTqtCmh7xU2eMFkWweYWF1pqdPyatTF1qP",
+        /*
+        "Program log: Instruction: CykuraSwap",
+        "Program cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8 invoke [3]",
+        "Program log: Instruction: ExactInputSingle",
+        "Program log: ProgramError caused by account: core_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        */
+        "cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8",
+        /*
+        "Program 6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc invoke [1]",
+        "Program log: TestMode : 0",
+        "Program log: [from bot] Profitability : 1.036820375 Slot : 237528550 Dropped Slot : 0",
+        "Program log: panicked at 'index out of bounds: the len is 0 but the index is 291', src/exchange/orca.rs:41:22",
+        */
+        "6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc",
+        /*
+        "Program log: ProgramError caused by account: mine_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid."
+        */
+        "SPQR4kT3q2oUKEJes2L6NNSBCiPW9SfuhkuqC9bp6Sx",
+    ]
+);
+
 impl<'a> BorrowedAccount<'a> {
     /// Returns the transaction context
     pub fn transaction_context(&self) -> &TransactionContext {
@@ -736,6 +764,23 @@ impl<'a> BorrowedAccount<'a> {
     #[inline]
     pub fn get_owner(&self) -> &Pubkey {
         self.account.owner()
+    }
+
+    /// Should this account be serialized with zero length? This is to avoid serializing large
+    /// executable accounts.
+    pub fn serialize_as_zero_length(&self, program_id: &Pubkey, feature_set: &FeatureSet) -> bool {
+        if !self.is_executable(feature_set)
+            || self.is_writable()
+            || !feature_set.is_active(&feature_set::dont_serialize_executable_accounts::id())
+        {
+            false
+        } else if !feature_set
+            .is_active(&feature_set::dont_serialize_executable_accounts_exceptions::id())
+        {
+            !program_ids_exe_zero_length_exceptions().contains(program_id)
+        } else {
+            true
+        }
     }
 
     /// Assignes the owner of this account (transaction wide)
