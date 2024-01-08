@@ -41,6 +41,7 @@ use {
         loader_v4, native_loader,
         program_utils::limited_deserialize,
         pubkey::Pubkey,
+        rent_collector::RENT_EXEMPT_RENT_EPOCH,
         saturating_add_assign,
         system_instruction::{self, MAX_PERMITTED_DATA_LENGTH},
         transaction_context::{IndexOfAccount, InstructionContext, TransactionContext},
@@ -65,6 +66,8 @@ pub fn load_program_from_bytes(
     programdata: &[u8],
     loader_key: &Pubkey,
     account_size: usize,
+    rent_epoch: u64,
+    lamports: u64,
     deployment_slot: Slot,
     program_runtime_environment: Arc<BuiltinProgram<InvokeContext<'static>>>,
     reloading: bool,
@@ -80,6 +83,8 @@ pub fn load_program_from_bytes(
                 effective_slot,
                 programdata,
                 account_size,
+                rent_epoch,
+                lamports,
                 load_program_metrics,
             )
         }
@@ -91,6 +96,8 @@ pub fn load_program_from_bytes(
             effective_slot,
             programdata,
             account_size,
+            rent_epoch,
+            lamports,
             load_program_metrics,
         )
     }
@@ -103,7 +110,8 @@ pub fn load_program_from_bytes(
 
 macro_rules! deploy_program {
     ($invoke_context:expr, $program_id:expr, $loader_key:expr,
-     $account_size:expr, $slot:expr, $drop:expr, $new_programdata:expr $(,)?) => {{
+     $account_size:expr, $lamports:expr,
+     $slot:expr, $drop:expr, $new_programdata:expr $(,)?) => {{
         let mut load_program_metrics = LoadProgramMetrics::default();
         let mut register_syscalls_time = Measure::start("register_syscalls_time");
         let deployment_program_runtime_environment = create_program_runtime_environment_v1(
@@ -142,6 +150,8 @@ macro_rules! deploy_program {
             $new_programdata,
             $loader_key,
             $account_size,
+            RENT_EXEMPT_RENT_EPOCH,
+            $lamports,
             $slot,
             $invoke_context.programs_modified_by_tx.environments.program_runtime_v1.clone(),
             true,
@@ -523,7 +533,8 @@ fn process_loader_upgradeable_instruction(
                 ic_logger_msg!(log_collector, "Program account too small");
                 return Err(InstructionError::AccountDataTooSmall);
             }
-            if program.get_lamports() < rent.minimum_balance(program.get_data().len()) {
+            let lamports = program.get_lamports();
+            if lamports < rent.minimum_balance(program.get_data().len()) {
                 ic_logger_msg!(log_collector, "Program account not rent-exempt");
                 return Err(InstructionError::ExecutableAccountNotRentExempt);
             }
@@ -623,6 +634,7 @@ fn process_loader_upgradeable_instruction(
                 new_program_id,
                 &owner_id,
                 UpgradeableLoaderState::size_of_program().saturating_add(programdata_len),
+                lamports,
                 clock.slot,
                 {
                     drop(buffer);
@@ -714,6 +726,7 @@ fn process_loader_upgradeable_instruction(
                 return Err(InstructionError::InvalidAccountData);
             }
             let new_program_id = *program.get_key();
+            let lamports = program.get_lamports();
             drop(program);
 
             // Verify Buffer account
@@ -802,6 +815,7 @@ fn process_loader_upgradeable_instruction(
                 new_program_id,
                 program_id,
                 UpgradeableLoaderState::size_of_program().saturating_add(programdata_len),
+                lamports,
                 clock.slot,
                 {
                     drop(buffer);
@@ -1140,6 +1154,7 @@ fn process_loader_upgradeable_instruction(
                 return Err(InstructionError::InvalidAccountOwner);
             }
             let program_key = *program_account.get_key();
+            let lamports = program_account.get_lamports();
             match program_account.get_state()? {
                 UpgradeableLoaderState::Program {
                     programdata_address,
@@ -1238,6 +1253,7 @@ fn process_loader_upgradeable_instruction(
                 program_key,
                 &program_id,
                 UpgradeableLoaderState::size_of_program().saturating_add(new_len),
+                lamports,
                 clock_slot,
                 {
                     drop(programdata_account);
@@ -1503,6 +1519,8 @@ pub mod test_utils {
                     account.data(),
                     owner,
                     account.data().len(),
+                    account.rent_epoch(),
+                    account.lamports(),
                     0,
                     program_runtime_environment.clone(),
                     false,
@@ -3714,9 +3732,10 @@ mod tests {
             program_id,
             &bpf_loader_upgradeable::id(),
             elf.len(),
+            102,
             2,
             {},
-            &elf
+            &elf,
         );
         Ok(())
     }
@@ -3735,6 +3754,8 @@ mod tests {
             tx_usage_counter: AtomicU64::new(100),
             ix_usage_counter: AtomicU64::new(100),
             latest_access_slot: AtomicU64::new(0),
+            rent_epoch: 0,
+            lamports: 0,
         };
         invoke_context
             .programs_modified_by_tx
@@ -3775,6 +3796,8 @@ mod tests {
             tx_usage_counter: AtomicU64::new(100),
             ix_usage_counter: AtomicU64::new(100),
             latest_access_slot: AtomicU64::new(0),
+            rent_epoch: 0,
+            lamports: 0,
         };
         invoke_context
             .programs_modified_by_tx
