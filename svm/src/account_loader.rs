@@ -8,7 +8,7 @@ use {
     log::warn,
     solana_program_runtime::{
         compute_budget_processor::process_compute_budget_instructions,
-        loaded_programs::LoadedProgramsForTxBatch,
+        loaded_programs::{LoadedProgram, LoadedProgramsForTxBatch},
     },
     solana_sdk::{
         account::{
@@ -16,8 +16,9 @@ use {
             ReadableAccount, WritableAccount,
         },
         feature_set::{
-            self, include_loaded_accounts_data_size_in_fee_calculation,
-            remove_rounding_in_fee_calculation,
+            self, dont_load_executable_accounts,
+            include_loaded_accounts_data_size_in_fee_calculation,
+            remove_rounding_in_fee_calculation, FeatureSet,
         },
         fee::FeeStructure,
         message::SanitizedMessage,
@@ -34,7 +35,7 @@ use {
         transaction_context::{IndexOfAccount, TransactionAccount},
     },
     solana_system_program::{get_system_account_kind, SystemAccountKind},
-    std::{collections::HashMap, num::NonZeroUsize},
+    std::{collections::HashMap, num::NonZeroUsize, sync::Arc},
 };
 
 // for the load instructions
@@ -58,7 +59,7 @@ pub fn load_accounts<CB: TransactionProcessingCallback>(
     error_counters: &mut TransactionErrorMetrics,
     fee_structure: &FeeStructure,
     account_overrides: Option<&AccountOverrides>,
-    program_accounts: &HashMap<Pubkey, (&Pubkey, u64)>,
+    program_accounts: &HashMap<Pubkey, (&Pubkey, u64, bool)>,
     loaded_programs: &LoadedProgramsForTxBatch,
 ) -> Vec<TransactionLoadResult> {
     let feature_set = callbacks.get_feature_set();
@@ -125,7 +126,7 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
     fee: u64,
     error_counters: &mut TransactionErrorMetrics,
     account_overrides: Option<&AccountOverrides>,
-    program_accounts: &HashMap<Pubkey, (&Pubkey, u64)>,
+    program_accounts: &HashMap<Pubkey, (&Pubkey, u64, bool)>,
     loaded_programs: &LoadedProgramsForTxBatch,
 ) -> Result<LoadedTransaction> {
     // NOTE: this check will never fail because `tx` is sanitized
@@ -173,52 +174,69 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                     account_overrides.and_then(|overrides| overrides.get(key))
                 {
                     (account_override.data().len(), account_override.clone(), 0)
-                } else if let Some(program) = (!instruction_account && !message.is_writable(i))
-                    .then_some(())
-                    .and_then(|_| loaded_programs.find(key))
-                {
-                    // Optimization to skip loading of accounts which are only used as
-                    // programs in top-level instructions and not passed as instruction accounts.
-                    account_shared_data_from_program(key, program_accounts)
-                        .map(|program_account| (program.account_size, program_account, 0))?
-                } else {
-                    callbacks
-                        .get_account_shared_data(key)
-                        .map(|mut account| {
-                            if message.is_writable(i) {
-                                if !feature_set
-                                    .is_active(&feature_set::disable_rent_fees_collection::id())
-                                {
-                                    let rent_due = rent_collector
-                                        .collect_from_existing_account(key, &mut account)
-                                        .rent_amount;
+                } else if feature_set.is_active(&dont_load_executable_accounts::id()) {
+                    if let Some(program) = (!message.is_writable(i))
+                        .then_some(())
+                        .and_then(|_| loaded_programs.find(key))
+                    {
+                        let (program_owner, _count, load) = program_accounts
+                            .get(key)
+                            .ok_or(TransactionError::AccountNotFound)?;
 
-                                    (account.data().len(), account, rent_due)
-                                } else {
-                                    // When rent fee collection is disabled, we won't collect rent for any account. If there
-                                    // are any rent paying accounts, their `rent_epoch` won't change either. However, if the
-                                    // account itself is rent-exempted but its `rent_epoch` is not u64::MAX, we will set its
-                                    // `rent_epoch` to u64::MAX. In such case, the behavior stays the same as before.
-                                    if account.rent_epoch() != RENT_EXEMPT_RENT_EPOCH
-                                        && rent_collector.get_rent_due(&account) == RentDue::Exempt
-                                    {
-                                        account.set_rent_epoch(RENT_EXEMPT_RENT_EPOCH);
-                                    }
-                                    (account.data().len(), account, 0)
-                                }
-                            } else {
-                                (account.data().len(), account, 0)
-                            }
-                        })
-                        .unwrap_or_else(|| {
-                            account_found = false;
-                            let mut default_account = AccountSharedData::default();
-                            // All new accounts must be rent-exempt (enforced in Bank::execute_loaded_transaction).
-                            // Currently, rent collection sets rent_epoch to u64::MAX, but initializing the account
-                            // with this field already set would allow us to skip rent collection for these accounts.
-                            default_account.set_rent_epoch(RENT_EXEMPT_RENT_EPOCH);
-                            (default_account.data().len(), default_account, 0)
-                        })
+                        if !instruction_account || (!load && !program.is_tombstone()) {
+                            account_shared_data_from_program(
+                                program,
+                                program_owner,
+                                !instruction_account,
+                            )
+                            .map(|program_account| {
+                                (program_account.data().len(), program_account, 0)
+                            })?
+                        } else {
+                            load_account(
+                                callbacks,
+                                key,
+                                message,
+                                i,
+                                &feature_set,
+                                rent_collector,
+                                &mut account_found,
+                            )
+                        }
+                    } else {
+                        load_account(
+                            callbacks,
+                            key,
+                            message,
+                            i,
+                            &feature_set,
+                            rent_collector,
+                            &mut account_found,
+                        )
+                    }
+                } else {
+                    if let Some(program) = (!instruction_account && !message.is_writable(i))
+                        .then_some(())
+                        .and_then(|_| loaded_programs.find(key))
+                    {
+                        let (program_owner, _count, _load) = program_accounts
+                            .get(key)
+                            .ok_or(TransactionError::AccountNotFound)?;
+
+                        account_shared_data_from_program(program, program_owner, false).map(
+                            |program_account| (program_account.data().len(), program_account, 0),
+                        )?
+                    } else {
+                        load_account(
+                            callbacks,
+                            key,
+                            message,
+                            i,
+                            &feature_set,
+                            rent_collector,
+                            &mut account_found,
+                        )
+                    }
                 };
                 accumulate_and_check_loaded_account_data_size(
                     &mut accumulated_accounts_data_size,
@@ -364,19 +382,24 @@ fn get_requested_loaded_accounts_data_size_limit(
 }
 
 fn account_shared_data_from_program(
-    key: &Pubkey,
-    program_accounts: &HashMap<Pubkey, (&Pubkey, u64)>,
+    program: Arc<LoadedProgram>,
+    program_owner: &Pubkey,
+    pad_with_zeros: bool,
 ) -> Result<AccountSharedData> {
     // It's an executable program account. The program is already loaded in the cache.
     // So the account data is not needed. Return a dummy AccountSharedData with meta
     // information.
     let mut program_account = AccountSharedData::default();
-    let (program_owner, _count) = program_accounts
-        .get(key)
-        .ok_or(TransactionError::AccountNotFound)?;
-    program_account.set_owner(**program_owner);
+    program_account.set_owner(*program_owner);
     program_account.set_executable(true);
-    program_account.set_data_from_slice(create_executable_meta(program_owner));
+    let mut data = create_executable_meta(program_owner).to_vec();
+    if pad_with_zeros {
+        data.resize(program.account_size, 0);
+    }
+    program_account.set_data_from_slice(&data);
+    program_account.set_rent_epoch(program.rent_epoch);
+    program_account.set_lamports(program.lamports);
+
     Ok(program_account)
 }
 
@@ -458,6 +481,52 @@ pub fn construct_instructions_account(message: &SanitizedMessage) -> AccountShar
         owner: sysvar::id(),
         ..Account::default()
     })
+}
+
+fn load_account<CB: TransactionProcessingCallback>(
+    callbacks: &CB,
+    key: &Pubkey,
+    message: &SanitizedMessage,
+    i: usize,
+    feature_set: &Arc<FeatureSet>,
+    rent_collector: &RentCollector,
+    account_found: &mut bool,
+) -> (usize, AccountSharedData, u64) {
+    callbacks
+        .get_account_shared_data(key)
+        .map(|mut account| {
+            if message.is_writable(i) {
+                if !feature_set.is_active(&feature_set::disable_rent_fees_collection::id()) {
+                    let rent_due = rent_collector
+                        .collect_from_existing_account(key, &mut account)
+                        .rent_amount;
+
+                    (account.data().len(), account, rent_due)
+                } else {
+                    // When rent fee collection is disabled, we won't collect rent for any account. If there
+                    // are any rent paying accounts, their `rent_epoch` won't change either. However, if the
+                    // account itself is rent-exempted but its `rent_epoch` is not u64::MAX, we will set its
+                    // `rent_epoch` to u64::MAX. In such case, the behavior stays the same as before.
+                    if account.rent_epoch() != RENT_EXEMPT_RENT_EPOCH
+                        && rent_collector.get_rent_due(&account) == RentDue::Exempt
+                    {
+                        account.set_rent_epoch(RENT_EXEMPT_RENT_EPOCH);
+                    }
+                    (account.data().len(), account, 0)
+                }
+            } else {
+                (account.data().len(), account, 0)
+            }
+        })
+        .unwrap_or_else(|| {
+            *account_found = false;
+            let mut default_account = AccountSharedData::default();
+            // All new accounts must be rent-exempt (enforced in Bank::execute_loaded_transaction).
+            // Currently, rent collection sets rent_epoch to u64::MAX, but initializing the account
+            // with this field already set would allow us to skip rent collection for these accounts.
+            default_account.set_rent_epoch(RENT_EXEMPT_RENT_EPOCH);
+            (default_account.data().len(), default_account, 0)
+        })
 }
 
 #[cfg(test)]
