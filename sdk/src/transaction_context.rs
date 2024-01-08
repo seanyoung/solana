@@ -17,8 +17,7 @@ use {
 };
 use {
     crate::{
-        account::{is_builtin, is_executable, AccountSharedData, ReadableAccount},
-        feature_set::FeatureSet,
+        account::{is_builtin, AccountSharedData, ReadableAccount},
         instruction::InstructionError,
         pubkey::Pubkey,
     },
@@ -712,6 +711,53 @@ pub struct BorrowedAccount<'a> {
     account: RefMut<'a, AccountSharedData>,
 }
 
+// Mainnet-beta program_ids that cannot deal with serializing executable accounts zero-length
+solana_sdk::pubkeys!(
+    program_ids_exe_zero_length_exceptions,
+    [
+        "7K3UpbZViPnQDLn2DAM853B9J5GBxd1L1rLHy4KqSmWG",
+        "5mpjDRgoRYRmSnAXZTfB2bBkbpwvRjobXUjb4WYjF225",
+        "SRDmexy38YTqtCmh7xU2eMFkWweYWF1pqdPyatTF1qP", // NO ELF MAGIC
+        /*
+        "Program log: Instruction: CykuraSwap",
+        "Program cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8 invoke [3]",
+        "Program log: Instruction: ExactInputSingle",
+        "Program log: ProgramError caused by account: core_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        */
+        "cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8",
+        /*
+        "Program 6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc invoke [1]",
+        "Program log: TestMode : 0",
+        "Program log: [from bot] Profitability : 1.036820375 Slot : 237528550 Dropped Slot : 0",
+        "Program log: panicked at 'index out of bounds: the len is 0 but the index is 291', src/exchange/orca.rs:41:22",
+        */
+        "6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc",
+        /*
+        "Program log: ProgramError caused by account: mine_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid."
+        */
+        "SPQR4kT3q2oUKEJes2L6NNSBCiPW9SfuhkuqC9bp6Sx", // NO ELF MAGIC
+        /*
+         *Program SCPv1LabixHirZbX6s7Zj3oiBogadWZvGUKRvXD3Zec failed: invalid account data for instruction
+         */
+        "SCPv1LabixHirZbX6s7Zj3oiBogadWZvGUKRvXD3Zec", // NO ELF MAGIC
+        //           "Program log: panicked at 'index out of bounds: the len is 4 but the index is 291', src/exchange/orca.rs:41:22",
+        "8nbexi4ReN1u6iTBkuEExXKGisgjFkY6AjChF1k19aFU",
+        //           "Program log: ProgramError caused by account: gem_bank. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        "DyziFCftH7CpoSLvXmtqyeMD2HBZVEqWk7xkRF1vcNqt",
+        //   "Program log: Instruction: WithdrawFromPool",
+        //           "Program log: An account's data contents was invalid",
+        "D83mNLnWHX1DmFTWFTG2zJXxjEnwX2dVTWNitExRJTsE",
+        // Program log: ProgramError caused by account: gem_bank. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.
+        "GzYDEAKs7vTsqAxBWrbUEpMMH5xRRazRPGdd6Kp3e7Rh",
+        //"Program log: ProgramError caused by account: gem_bank. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        "Dp8bcStZSpR4EyKuzcAJUFjnZKfoNo9iYM93BAxtDLve",
+        //"Program log: ProgramError occurred. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        "BsKyUMNe1jXxiv3Y57H6UfkeodUYgHKuafaN4HSWdXj1",
+        //"Program log: ProgramError caused by account: gem_bank. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        "7NryUmAmy8hMbawRNUs9UdkgAGEiHFxghSfve31dC7xh",
+    ]
+);
+
 impl<'a> BorrowedAccount<'a> {
     /// Returns the transaction context
     pub fn transaction_context(&self) -> &TransactionContext {
@@ -740,11 +786,7 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Assignes the owner of this account (transaction wide)
     #[cfg(not(target_os = "solana"))]
-    pub fn set_owner(
-        &mut self,
-        pubkey: &[u8],
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn set_owner(&mut self, pubkey: &[u8]) -> Result<(), InstructionError> {
         // Only the owner can assign a new owner
         if !self.is_owned_by_current_program() {
             return Err(InstructionError::ModifiedProgramId);
@@ -754,7 +796,7 @@ impl<'a> BorrowedAccount<'a> {
             return Err(InstructionError::ModifiedProgramId);
         }
         // and only if the account is not executable
-        if self.is_executable(feature_set) {
+        if self.is_executable() {
             return Err(InstructionError::ModifiedProgramId);
         }
         // and only if the data is zero-initialized or empty
@@ -778,11 +820,7 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Overwrites the number of lamports of this account (transaction wide)
     #[cfg(not(target_os = "solana"))]
-    pub fn set_lamports(
-        &mut self,
-        lamports: u64,
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn set_lamports(&mut self, lamports: u64) -> Result<(), InstructionError> {
         // An account not owned by the program cannot have its balance decrease
         if !self.is_owned_by_current_program() && lamports < self.get_lamports() {
             return Err(InstructionError::ExternalAccountLamportSpend);
@@ -792,7 +830,7 @@ impl<'a> BorrowedAccount<'a> {
             return Err(InstructionError::ReadonlyLamportChange);
         }
         // The balance of executable accounts may not change
-        if self.is_executable(feature_set) {
+        if self.is_executable() {
             return Err(InstructionError::ExecutableLamportChange);
         }
         // don't touch the account if the lamports do not change
@@ -806,31 +844,21 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Adds lamports to this account (transaction wide)
     #[cfg(not(target_os = "solana"))]
-    pub fn checked_add_lamports(
-        &mut self,
-        lamports: u64,
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn checked_add_lamports(&mut self, lamports: u64) -> Result<(), InstructionError> {
         self.set_lamports(
             self.get_lamports()
                 .checked_add(lamports)
                 .ok_or(InstructionError::ArithmeticOverflow)?,
-            feature_set,
         )
     }
 
     /// Subtracts lamports from this account (transaction wide)
     #[cfg(not(target_os = "solana"))]
-    pub fn checked_sub_lamports(
-        &mut self,
-        lamports: u64,
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn checked_sub_lamports(&mut self, lamports: u64) -> Result<(), InstructionError> {
         self.set_lamports(
             self.get_lamports()
                 .checked_sub(lamports)
                 .ok_or(InstructionError::ArithmeticOverflow)?,
-            feature_set,
         )
     }
 
@@ -842,11 +870,8 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Returns a writable slice of the account data (transaction wide)
     #[cfg(not(target_os = "solana"))]
-    pub fn get_data_mut(
-        &mut self,
-        feature_set: &FeatureSet,
-    ) -> Result<&mut [u8], InstructionError> {
-        self.can_data_be_changed(feature_set)?;
+    pub fn get_data_mut(&mut self) -> Result<&mut [u8], InstructionError> {
+        self.can_data_be_changed()?;
         self.touch()?;
         self.make_data_mut();
         Ok(self.account.data_as_mut_slice())
@@ -871,13 +896,9 @@ impl<'a> BorrowedAccount<'a> {
         not(target_os = "solana"),
         any(test, feature = "dev-context-only-utils")
     ))]
-    pub fn set_data(
-        &mut self,
-        data: Vec<u8>,
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn set_data(&mut self, data: Vec<u8>) -> Result<(), InstructionError> {
         self.can_data_be_resized(data.len())?;
-        self.can_data_be_changed(feature_set)?;
+        self.can_data_be_changed()?;
         self.touch()?;
 
         self.update_accounts_resize_delta(data.len())?;
@@ -890,13 +911,9 @@ impl<'a> BorrowedAccount<'a> {
     /// Call this when you have a slice of data you do not own and want to
     /// replace the account data with it.
     #[cfg(not(target_os = "solana"))]
-    pub fn set_data_from_slice(
-        &mut self,
-        data: &[u8],
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn set_data_from_slice(&mut self, data: &[u8]) -> Result<(), InstructionError> {
         self.can_data_be_resized(data.len())?;
-        self.can_data_be_changed(feature_set)?;
+        self.can_data_be_changed()?;
         self.touch()?;
         self.update_accounts_resize_delta(data.len())?;
         // Calling make_data_mut() here guarantees that set_data_from_slice()
@@ -915,13 +932,9 @@ impl<'a> BorrowedAccount<'a> {
     ///
     /// Fills it with zeros at the end if is extended or truncates at the end otherwise.
     #[cfg(not(target_os = "solana"))]
-    pub fn set_data_length(
-        &mut self,
-        new_length: usize,
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn set_data_length(&mut self, new_length: usize) -> Result<(), InstructionError> {
         self.can_data_be_resized(new_length)?;
-        self.can_data_be_changed(feature_set)?;
+        self.can_data_be_changed()?;
         // don't touch the account if the length does not change
         if self.get_data().len() == new_length {
             return Ok(());
@@ -934,14 +947,10 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Appends all elements in a slice to the account
     #[cfg(not(target_os = "solana"))]
-    pub fn extend_from_slice(
-        &mut self,
-        data: &[u8],
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
+    pub fn extend_from_slice(&mut self, data: &[u8]) -> Result<(), InstructionError> {
         let new_len = self.get_data().len().saturating_add(data.len());
         self.can_data_be_resized(new_len)?;
-        self.can_data_be_changed(feature_set)?;
+        self.can_data_be_changed()?;
 
         if data.is_empty() {
             return Ok(());
@@ -1014,12 +1023,8 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Serializes a state into the account data
     #[cfg(not(target_os = "solana"))]
-    pub fn set_state<T: serde::Serialize>(
-        &mut self,
-        state: &T,
-        feature_set: &FeatureSet,
-    ) -> Result<(), InstructionError> {
-        let data = self.get_data_mut(feature_set)?;
+    pub fn set_state<T: serde::Serialize>(&mut self, state: &T) -> Result<(), InstructionError> {
+        let data = self.get_data_mut()?;
         let serialized_size =
             bincode::serialized_size(state).map_err(|_| InstructionError::GenericError)?;
         if serialized_size > data.len() as u64 {
@@ -1040,8 +1045,8 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Returns whether this account is executable (transaction wide)
     #[inline]
-    pub fn is_executable(&self, feature_set: &FeatureSet) -> bool {
-        is_builtin(&*self.account) || is_executable(&*self.account, feature_set)
+    pub fn is_executable(&self) -> bool {
+        is_builtin(&*self.account) || self.account.executable()
     }
 
     /// Configures whether this account is executable (transaction wide)
@@ -1119,9 +1124,9 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Returns an error if the account data can not be mutated by the current program
     #[cfg(not(target_os = "solana"))]
-    pub fn can_data_be_changed(&self, feature_set: &FeatureSet) -> Result<(), InstructionError> {
+    pub fn can_data_be_changed(&self) -> Result<(), InstructionError> {
         // Only non-executable accounts data can be changed
-        if self.is_executable(feature_set) {
+        if self.is_executable() {
             return Err(InstructionError::ExecutableDataModified);
         }
         // and only if the account is writable

@@ -16,7 +16,11 @@ use {
             create_executable_meta, is_builtin, is_executable, Account, AccountSharedData,
             ReadableAccount, WritableAccount,
         },
-        feature_set::{self, include_loaded_accounts_data_size_in_fee_calculation},
+        feature_set::{
+            self, dont_serialize_executable_accounts,
+            dont_serialize_executable_accounts_no_exceptions,
+            include_loaded_accounts_data_size_in_fee_calculation, FeatureSet,
+        },
         fee::FeeStructure,
         message::SanitizedMessage,
         native_loader,
@@ -29,10 +33,10 @@ use {
         saturating_add_assign,
         sysvar::{self, instructions::construct_instructions_data},
         transaction::{self, Result, SanitizedTransaction, TransactionError},
-        transaction_context::IndexOfAccount,
+        transaction_context::{program_ids_exe_zero_length_exceptions, IndexOfAccount},
     },
     solana_system_program::{get_system_account_kind, SystemAccountKind},
-    std::{collections::HashMap, num::NonZeroUsize},
+    std::{collections::HashMap, num::NonZeroUsize, sync::Arc},
 };
 
 pub type TransactionCheckResult = (transaction::Result<()>, Option<NoncePartial>, Option<u64>);
@@ -158,14 +162,17 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                     account_overrides.and_then(|overrides| overrides.get(key))
                 {
                     (account_override.data().len(), account_override.clone(), 0)
-                } else if let Some(program) = (!instruction_account && !message.is_writable(i))
-                    .then_some(())
-                    .and_then(|_| loaded_programs.find(key))
-                {
+                } else if let Some(account_size) = elide_loading_program(
+                    key,
+                    message.is_writable(i),
+                    instruction_account,
+                    &feature_set,
+                    loaded_programs,
+                ) {
                     // Optimization to skip loading of accounts which are only used as
                     // programs in top-level instructions and not passed as instruction accounts.
                     account_shared_data_from_program(key, program_accounts)
-                        .map(|program_account| (program.account_size, program_account, 0))?
+                        .map(|program_account| (account_size, program_account, 0))?
                 } else {
                     callbacks
                         .get_account_shared_data(key)
@@ -278,6 +285,7 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 error_counters.invalid_program_for_execution += 1;
                 return Err(TransactionError::InvalidProgramForExecution);
             }
+
             account_indices.insert(0, program_index as IndexOfAccount);
             let owner_id = program_account.owner();
             if native_loader::check_id(owner_id) {
@@ -326,6 +334,44 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
     })
 }
 
+fn elide_loading_program(
+    key: &Pubkey,
+    writable: bool,
+    instruction_account: bool,
+    feature_set: &Arc<FeatureSet>,
+    loaded_programs: &LoadedProgramsForTxBatch,
+) -> Option<usize> {
+    // if the account is writable, we have to load it
+    if writable {
+        return None;
+    }
+
+    // It has to be an executable program account
+    let program = loaded_programs.find(key)?;
+
+    if program.is_builtin() {
+        return None;
+    }
+
+    // If the account is not passed as instruction accounts, we can simply avoid loading it
+    if !instruction_account {
+        // previous code used correct account size here; not sure this actually matters
+        Some(program.account_size)
+    } else if feature_set.is_active(&dont_serialize_executable_accounts::id()) {
+        // Serialize programs as zero-length if the feature is enabled
+        // Set of programs that do not handle executables serialized as zero length
+        if feature_set.is_active(&dont_serialize_executable_accounts_no_exceptions::id())
+            || !program_ids_exe_zero_length_exceptions().contains(key)
+        {
+            Some(program.account_size)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// Total accounts data a transaction can load is limited to
 ///   if `set_tx_loaded_accounts_data_size` instruction is not activated or not used, then
 ///     default value of 64MiB to not break anyone in Mainnet-beta today
@@ -362,6 +408,8 @@ fn account_shared_data_from_program(
     program_account.set_owner(**program_owner);
     program_account.set_executable(true);
     program_account.set_data_from_slice(create_executable_meta(program_owner));
+    program_account.set_rent_epoch(u64::MAX);
+
     Ok(program_account)
 }
 

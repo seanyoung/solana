@@ -2508,22 +2508,31 @@ fn test_program_reads_from_program_account() {
         ..
     } = create_genesis_config(50);
 
-    let (bank, bank_forks) = Bank::new_with_bank_forks_for_tests(&genesis_config);
-    let mut bank_client = BankClient::new_shared(bank);
-    let authority_keypair = Keypair::new();
+    for dont_serialize in [false, true] {
+        let mut bank = Bank::new_for_tests(&genesis_config);
+        let feature_set = Arc::make_mut(&mut bank.feature_set);
+        // by default test banks have all features enabled, so we only need to
+        // disable when needed
+        if !dont_serialize {
+            feature_set.deactivate(&feature_set::dont_serialize_executable_accounts::id());
+        }
+        let (bank, bank_forks) = bank.wrap_with_bank_forks_for_tests();
+        let mut bank_client = BankClient::new_shared(bank);
+        let authority_keypair = Keypair::new();
 
-    let (_bank, program_id) = load_upgradeable_program_and_advance_slot(
-        &mut bank_client,
-        bank_forks.as_ref(),
-        &mint_keypair,
-        &authority_keypair,
-        "read_program",
-    );
-    let account_metas = vec![AccountMeta::new_readonly(program_id, false)];
-    let instruction = Instruction::new_with_bytes(program_id, &[], account_metas);
-    bank_client
-        .send_and_confirm_instruction(&mint_keypair, instruction)
-        .unwrap();
+        let (_bank, program_id) = load_upgradeable_program_and_advance_slot(
+            &mut bank_client,
+            bank_forks.as_ref(),
+            &mint_keypair,
+            &authority_keypair,
+            "read_program",
+        );
+        let account_metas = vec![AccountMeta::new_readonly(program_id, false)];
+        let instruction = Instruction::new_with_bytes(program_id, &[], account_metas);
+        bank_client
+            .send_and_confirm_instruction(&mint_keypair, instruction)
+            .unwrap();
+    }
 }
 
 #[test]
@@ -4709,6 +4718,7 @@ fn test_deny_executable_write() {
         if !direct_mapping {
             feature_set.deactivate(&feature_set::bpf_account_data_direct_mapping::id());
         }
+        feature_set.deactivate(&feature_set::dont_serialize_executable_accounts::id());
         let (bank, bank_forks) = bank.wrap_with_bank_forks_for_tests();
         let mut bank_client = BankClient::new_shared(bank);
         let authority_keypair = Keypair::new();

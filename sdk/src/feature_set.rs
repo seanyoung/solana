@@ -780,6 +780,14 @@ pub mod enable_chained_merkle_shreds {
     solana_sdk::declare_id!("7uZBkJXJ1HkuP6R3MJfZs7mLwymBcDbKdqbF51ZWLier");
 }
 
+pub mod dont_serialize_executable_accounts {
+    solana_sdk::declare_id!("SeanGLG9chXD7bUF42nxUkyhhasZ38RauPFSK5txEkE");
+}
+
+pub mod dont_serialize_executable_accounts_no_exceptions {
+    solana_sdk::declare_id!("Seanx5tafZesNtxNeayrDHj5WFyzfCnsDse2ucj6ATz");
+}
+
 lazy_static! {
     /// Map of feature identifiers to user-visible description
     pub static ref FEATURE_NAMES: HashMap<Pubkey, &'static str> = [
@@ -970,6 +978,8 @@ lazy_static! {
         (cost_model_requested_write_lock_cost::id(), "cost model uses number of requested write locks #34819"),
         (enable_gossip_duplicate_proof_ingestion::id(), "enable gossip duplicate proof ingestion #32963"),
         (enable_chained_merkle_shreds::id(), "Enable chained Merkle shreds #34916"),
+        (dont_serialize_executable_accounts::id(), "executable ro accounts should not be serialized"),
+        (dont_serialize_executable_accounts_no_exceptions::id(), "executable ro accounts should not be serialized program_id exceptions"),
         /*************** ADD NEW FEATURES HERE ***************/
     ]
     .iter()

@@ -81,8 +81,7 @@ const READONLY_ACCOUNTS: &[SolAccountInfo] = &[
 ];
 
 const PUBKEY: Pubkey = Pubkey::new_from_array([
-    0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);
 
 fn check_preconditions(

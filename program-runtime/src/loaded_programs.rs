@@ -437,6 +437,10 @@ impl LoadedProgram {
         )
     }
 
+    pub fn is_builtin(&self) -> bool {
+        matches!(self.program, LoadedProgramType::Builtin(..))
+    }
+
     fn is_implicit_delay_visibility_tombstone(&self, slot: Slot) -> bool {
         !matches!(self.program, LoadedProgramType::Builtin(_))
             && self.effective_slot.saturating_sub(self.deployment_slot)
