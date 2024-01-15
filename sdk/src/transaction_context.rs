@@ -769,15 +769,8 @@ impl<'a> BorrowedAccount<'a> {
     /// Should this account be serialized with zero length? This is to avoid serializing large
     /// executable accounts.
     pub fn serialize_as_zero_length(&self, program_id: &Pubkey, feature_set: &FeatureSet) -> bool {
-        if !self.is_executable(feature_set)
-            || self.is_writable()
-            || !feature_set.is_active(&feature_set::dont_serialize_executable_accounts::id())
-        {
+        if !self.is_executable(feature_set) || self.is_writable() {
             false
-        } else if !feature_set
-            .is_active(&feature_set::dont_serialize_executable_accounts_exceptions::id())
-        {
-            !program_ids_exe_zero_length_exceptions().contains(program_id)
         } else {
             true
         }
