@@ -773,6 +773,16 @@ impl<'a> BorrowedAccount<'a> {
         self.account.owner()
     }
 
+    /// Should this account be serialized with zero length? This is to avoid serializing large
+    /// executable accounts.
+    pub fn serialize_as_elf_magic(&self) -> bool {
+        if !self.is_executable() || self.is_writable() {
+            false
+        } else {
+            true
+        }
+    }
+
     /// Assignes the owner of this account (transaction wide)
     #[cfg(not(target_os = "solana"))]
     pub fn set_owner(&mut self, pubkey: &[u8]) -> Result<(), InstructionError> {
@@ -865,6 +875,16 @@ impl<'a> BorrowedAccount<'a> {
     #[inline]
     pub fn get_data(&self) -> &[u8] {
         self.account.data()
+    }
+
+    /// Returns a read-only slice of the account data (transaction wide)
+    #[inline]
+    pub fn get_serialized_data(&self) -> &[u8] {
+        if !self.is_executable() || self.is_writable() {
+            self.account.data()
+        } else {
+            b"ELF\x7f"
+        }
     }
 
     /// Returns a writable slice of the account data (transaction wide)

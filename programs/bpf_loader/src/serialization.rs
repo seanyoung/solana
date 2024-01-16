@@ -79,14 +79,14 @@ impl Serializer {
 
     fn write_account(&mut self, account: &mut BorrowedAccount<'_>) -> Result<(), InstructionError> {
         if self.copy_account_data {
-            self.write_all(account.get_data());
+            self.write_all(account.get_serialized_data());
         } else {
             self.push_account_region(account)?;
         }
 
         if self.aligned {
-            let align_offset =
-                (account.get_data().len() as *const u8).align_offset(BPF_ALIGN_OF_U128);
+            let data_len = account.get_serialized_data().len();
+            let align_offset = (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
             if self.copy_account_data {
                 self.fill_write(MAX_PERMITTED_DATA_INCREASE + align_offset, 0)
                     .map_err(|_| InstructionError::InvalidArgument)?;
@@ -131,7 +131,7 @@ impl Serializer {
                     MemoryRegion::new_writable(account.get_data_mut()?, self.vaddr)
                 }
             } else {
-                MemoryRegion::new_readonly(account.get_data(), self.vaddr)
+                MemoryRegion::new_readonly(account.get_serialized_data(), self.vaddr)
             };
             self.vaddr += region.len;
             self.regions.push(region);
@@ -277,7 +277,7 @@ fn serialize_parameters_unaligned(
                 + size_of::<u8>() // executable
                 + size_of::<u64>(); // rent_epoch
                 if copy_account_data {
-                    size += account.get_data().len();
+                    size += account.get_serialized_data().len();
                 }
             }
         }
@@ -298,7 +298,7 @@ fn serialize_parameters_unaligned(
                 s.write::<u8>(account.is_writable() as u8);
                 s.write_all(account.get_key().as_ref());
                 s.write::<u64>(account.get_lamports().to_le());
-                s.write::<u64>((account.get_data().len() as u64).to_le());
+                s.write::<u64>((account.get_serialized_data().len() as u64).to_le());
                 s.write_account(&mut account)?;
                 s.write_all(account.get_owner().as_ref());
                 s.write::<u8>(account.is_executable() as u8);
@@ -349,19 +349,20 @@ pub fn deserialize_parameters_unaligned(
             start += size_of::<u64>() // lamports
                 + size_of::<u64>(); // data length
             if copy_account_data {
-                let data = buffer
-                    .get(start..start + pre_len)
-                    .ok_or(InstructionError::InvalidArgument)?;
-                // The redundant check helps to avoid the expensive data comparison if we can
-                match borrowed_account
-                    .can_data_be_resized(data.len())
-                    .and_then(|_| borrowed_account.can_data_be_changed())
-                {
-                    Ok(()) => borrowed_account.set_data_from_slice(data)?,
-                    Err(err) if borrowed_account.get_data() != data => return Err(err),
-                    _ => {}
+                if !borrowed_account.serialize_as_elf_magic() {
+                    let data = buffer
+                        .get(start..start + pre_len)
+                        .ok_or(InstructionError::InvalidArgument)?;
+                    // The redundant check helps to avoid the expensive data comparison if we can
+                    match borrowed_account
+                        .can_data_be_resized(data.len())
+                        .and_then(|_| borrowed_account.can_data_be_changed())
+                    {
+                        Ok(()) => borrowed_account.set_data_from_slice(data)?,
+                        Err(err) if borrowed_account.get_data() != data => return Err(err),
+                        _ => {}
+                    }
                 }
-                start += pre_len; // data
             }
             start += size_of::<Pubkey>() // owner
                 + size_of::<u8>() // executable
@@ -384,7 +385,7 @@ fn serialize_parameters_aligned(
         match account {
             SerializeAccount::Duplicate(_) => size += 7, // padding to 64-bit aligned
             SerializeAccount::Account(_, account) => {
-                let data_len = account.get_data().len();
+                let data_len = account.get_serialized_data().len();
                 size += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
@@ -422,7 +423,7 @@ fn serialize_parameters_aligned(
                 s.write_all(borrowed_account.get_key().as_ref());
                 s.write_all(borrowed_account.get_owner().as_ref());
                 s.write::<u64>(borrowed_account.get_lamports().to_le());
-                s.write::<u64>((borrowed_account.get_data().len() as u64).to_le());
+                s.write::<u64>((borrowed_account.get_serialized_data().len() as u64).to_le());
                 s.write_account(&mut borrowed_account)?;
                 s.write::<u64>((borrowed_account.get_rent_epoch()).to_le());
             }
@@ -463,6 +464,8 @@ pub fn deserialize_parameters_aligned(
         } else {
             let mut borrowed_account = instruction_context
                 .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
+            let serialize_as_elf_magic = borrowed_account.serialize_as_elf_magic();
+
             start += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
@@ -481,11 +484,17 @@ pub fn deserialize_parameters_aligned(
                 borrowed_account.set_lamports(lamports)?;
             }
             start += size_of::<u64>(); // lamports
-            let post_len = LittleEndian::read_u64(
+            let mut post_len = LittleEndian::read_u64(
                 buffer
                     .get(start..)
                     .ok_or(InstructionError::InvalidArgument)?,
             ) as usize;
+            if serialize_as_elf_magic {
+                if post_len != 4 {
+                    return Err(InstructionError::AccountDataSizeChanged);
+                }
+                post_len = *pre_len;
+            }
             start += size_of::<u64>(); // data length
             if post_len.saturating_sub(*pre_len) > MAX_PERMITTED_DATA_INCREASE
                 || post_len > MAX_PERMITTED_DATA_LENGTH as usize
@@ -495,45 +504,53 @@ pub fn deserialize_parameters_aligned(
             // The redundant check helps to avoid the expensive data comparison if we can
             let alignment_offset = (*pre_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
             if copy_account_data {
-                let data = buffer
-                    .get(start..start + post_len)
-                    .ok_or(InstructionError::InvalidArgument)?;
-                match borrowed_account
-                    .can_data_be_resized(post_len)
-                    .and_then(|_| borrowed_account.can_data_be_changed())
-                {
-                    Ok(()) => borrowed_account.set_data_from_slice(data)?,
-                    Err(err) if borrowed_account.get_data() != data => return Err(err),
-                    _ => {}
+                if !serialize_as_elf_magic {
+                    let data = buffer
+                        .get(start..start + post_len)
+                        .ok_or(InstructionError::InvalidArgument)?;
+                    match borrowed_account
+                        .can_data_be_resized(post_len)
+                        .and_then(|_| borrowed_account.can_data_be_changed())
+                    {
+                        Ok(()) => borrowed_account.set_data_from_slice(data)?,
+                        Err(err) if borrowed_account.get_data() != data => return Err(err),
+                        _ => {}
+                    }
+                    start += *pre_len; // data
+                } else {
+                    start += 4;
                 }
-                start += *pre_len; // data
             } else {
                 // See Serializer::write_account() as to why we have this
                 // padding before the realloc region here.
                 start += BPF_ALIGN_OF_U128.saturating_sub(alignment_offset);
-                let data = buffer
-                    .get(start..start + MAX_PERMITTED_DATA_INCREASE)
-                    .ok_or(InstructionError::InvalidArgument)?;
-                match borrowed_account
-                    .can_data_be_resized(post_len)
-                    .and_then(|_| borrowed_account.can_data_be_changed())
-                {
-                    Ok(()) => {
-                        borrowed_account.set_data_length(post_len)?;
-                        let allocated_bytes = post_len.saturating_sub(*pre_len);
-                        if allocated_bytes > 0 {
-                            borrowed_account
-                                .get_data_mut()?
-                                .get_mut(*pre_len..pre_len.saturating_add(allocated_bytes))
-                                .ok_or(InstructionError::InvalidArgument)?
-                                .copy_from_slice(
-                                    data.get(0..allocated_bytes)
-                                        .ok_or(InstructionError::InvalidArgument)?,
-                                );
+                if !serialize_as_elf_magic {
+                    let data = buffer
+                        .get(start..start + MAX_PERMITTED_DATA_INCREASE)
+                        .ok_or(InstructionError::InvalidArgument)?;
+                    match borrowed_account
+                        .can_data_be_resized(post_len)
+                        .and_then(|_| borrowed_account.can_data_be_changed())
+                    {
+                        Ok(()) => {
+                            borrowed_account.set_data_length(post_len)?;
+                            let allocated_bytes = post_len.saturating_sub(*pre_len);
+                            if allocated_bytes > 0 {
+                                borrowed_account
+                                    .get_data_mut()?
+                                    .get_mut(*pre_len..pre_len.saturating_add(allocated_bytes))
+                                    .ok_or(InstructionError::InvalidArgument)?
+                                    .copy_from_slice(
+                                        data.get(0..allocated_bytes)
+                                            .ok_or(InstructionError::InvalidArgument)?,
+                                    );
+                            }
                         }
+                        Err(err) if borrowed_account.get_data().len() != post_len => {
+                            return Err(err)
+                        }
+                        _ => {}
                     }
-                    Err(err) if borrowed_account.get_data().len() != post_len => return Err(err),
-                    _ => {}
                 }
             }
             start += MAX_PERMITTED_DATA_INCREASE;
@@ -883,7 +900,7 @@ mod tests {
                     .unwrap()
                     .borrow();
                 assert_eq!(account.lamports(), account_info.lamports());
-                assert_eq!(account.data(), &account_info.data.borrow()[..]);
+                assert!(account_info.data.borrow().is_empty());
                 assert_eq!(account.owner(), account_info.owner);
                 assert_eq!(account.executable(), account_info.executable);
                 assert_eq!(account.rent_epoch(), account_info.rent_epoch);
@@ -967,7 +984,7 @@ mod tests {
                     .unwrap()
                     .borrow();
                 assert_eq!(account.lamports(), account_info.lamports());
-                assert_eq!(account.data(), &account_info.data.borrow()[..]);
+                assert!(account_info.data.borrow().is_empty());
                 assert_eq!(account.owner(), account_info.owner);
                 assert_eq!(account.executable(), account_info.executable);
                 assert_eq!(account.rent_epoch(), account_info.rent_epoch);
