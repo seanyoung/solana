@@ -92,21 +92,22 @@ impl Serializer {
 
     fn write_account(
         &mut self,
+        program_id: &Pubkey,
         account: &mut BorrowedAccount<'_>,
     ) -> Result<u64, InstructionError> {
         let vm_data_addr = if self.copy_account_data {
             let vm_data_addr = self.vaddr.saturating_add(self.buffer.len() as u64);
-            self.write_all(account.get_serialized_data());
+            self.write_all(account.get_serialized_data(program_id));
             vm_data_addr
         } else {
             self.push_region(true);
             let vaddr = self.vaddr;
-            self.push_account_data_region(account)?;
+            self.push_account_data_region(program_id, account)?;
             vaddr
         };
 
         if self.aligned {
-            let data_len = account.get_serialized_data().len();
+            let data_len = account.get_serialized_data(program_id).len();
             let align_offset = (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
             if self.copy_account_data {
                 self.fill_write(MAX_PERMITTED_DATA_INCREASE + align_offset, 0)
@@ -130,18 +131,19 @@ impl Serializer {
 
     fn push_account_data_region(
         &mut self,
+        program_id: &Pubkey,
         account: &mut BorrowedAccount<'_>,
     ) -> Result<(), InstructionError> {
         if !account.get_data().is_empty() {
             let region = match account_data_region_memory_state(account) {
                 MemoryState::Readable => {
-                    MemoryRegion::new_readonly(account.get_serialized_data(), self.vaddr)
+                    MemoryRegion::new_readonly(account.get_serialized_data(program_id), self.vaddr)
                 }
                 MemoryState::Writable => {
                     MemoryRegion::new_writable(account.get_data_mut()?, self.vaddr)
                 }
                 MemoryState::Cow(index_in_transaction) => MemoryRegion::new_cow(
-                    account.get_serialized_data(),
+                    account.get_serialized_data(program_id),
                     self.vaddr,
                     index_in_transaction,
                 ),
@@ -315,7 +317,7 @@ fn serialize_parameters_unaligned(
                 + size_of::<u8>() // executable
                 + size_of::<u64>(); // rent_epoch
                 if copy_account_data {
-                    size += account.get_serialized_data().len();
+                    size += account.get_serialized_data(program_id).len();
                 }
             }
         }
@@ -340,13 +342,13 @@ fn serialize_parameters_unaligned(
                 s.write::<u8>(account.is_writable() as u8);
                 let vm_key_addr = s.write_all(account.get_key().as_ref());
                 let vm_lamports_addr = s.write::<u64>(account.get_lamports().to_le());
-                s.write::<u64>((account.get_serialized_data().len() as u64).to_le());
-                let vm_data_addr = s.write_account(&mut account)?;
+                s.write::<u64>((account.get_serialized_data(program_id).len() as u64).to_le());
+                let vm_data_addr = s.write_account(program_id, &mut account)?;
                 let vm_owner_addr = s.write_all(account.get_owner().as_ref());
                 s.write::<u8>(account.is_executable() as u8);
                 s.write::<u64>((account.get_rent_epoch()).to_le());
                 accounts_metadata.push(SerializedAccountMetadata {
-                    original_data_len: account.get_serialized_data().len(),
+                    original_data_len: account.get_serialized_data(program_id).len(),
                     vm_key_addr,
                     vm_lamports_addr,
                     vm_owner_addr,
@@ -375,6 +377,9 @@ pub fn deserialize_parameters_unaligned<I: IntoIterator<Item = usize>>(
         .get_number_of_instruction_accounts())
         .zip(account_lengths.into_iter())
     {
+        let program_id = instruction_context
+            .get_last_program_key(transaction_context)
+            .unwrap();
         let duplicate =
             instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
         start += 1; // is_dup
@@ -395,7 +400,7 @@ pub fn deserialize_parameters_unaligned<I: IntoIterator<Item = usize>>(
             start += size_of::<u64>() // lamports
                 + size_of::<u64>(); // data length
             if copy_account_data {
-                if !borrowed_account.serialize_as_elf_magic() {
+                if !borrowed_account.serialize_as_elf_magic(program_id) {
                     let data = buffer
                         .get(start..start + pre_len)
                         .ok_or(InstructionError::InvalidArgument)?;
@@ -442,7 +447,7 @@ fn serialize_parameters_aligned(
         match account {
             SerializeAccount::Duplicate(_) => size += 7, // padding to 64-bit aligned
             SerializeAccount::Account(_, account) => {
-                let data_len = account.get_serialized_data().len();
+                let data_len = account.get_serialized_data(program_id).len();
                 size += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
@@ -480,11 +485,13 @@ fn serialize_parameters_aligned(
                 let vm_key_addr = s.write_all(borrowed_account.get_key().as_ref());
                 let vm_owner_addr = s.write_all(borrowed_account.get_owner().as_ref());
                 let vm_lamports_addr = s.write::<u64>(borrowed_account.get_lamports().to_le());
-                s.write::<u64>((borrowed_account.get_serialized_data().len() as u64).to_le());
-                let vm_data_addr = s.write_account(&mut borrowed_account)?;
+                s.write::<u64>(
+                    (borrowed_account.get_serialized_data(program_id).len() as u64).to_le(),
+                );
+                let vm_data_addr = s.write_account(program_id, &mut borrowed_account)?;
                 s.write::<u64>((borrowed_account.get_rent_epoch()).to_le());
                 accounts_metadata.push(SerializedAccountMetadata {
-                    original_data_len: borrowed_account.get_serialized_data().len(),
+                    original_data_len: borrowed_account.get_serialized_data(program_id).len(),
                     vm_key_addr,
                     vm_owner_addr,
                     vm_lamports_addr,
@@ -518,6 +525,9 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
         .get_number_of_instruction_accounts())
         .zip(account_lengths.into_iter())
     {
+        let program_id = instruction_context
+            .get_last_program_key(transaction_context)
+            .unwrap();
         let duplicate =
             instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
         start += size_of::<u8>(); // position
@@ -526,7 +536,7 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
         } else {
             let mut borrowed_account = instruction_context
                 .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
-            let serialize_as_elf_magic = borrowed_account.serialize_as_elf_magic();
+            let serialize_as_elf_magic = borrowed_account.serialize_as_elf_magic(program_id);
 
             start += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable

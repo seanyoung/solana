@@ -293,7 +293,7 @@ impl solana_sdk::program_stubs::SyscallStubs for SyscallStubs {
                     .set_data_from_slice(&account_info_data)
                     .unwrap(),
                 Err(err)
-                    if !borrowed_account.serialize_as_elf_magic()
+                    if !borrowed_account.serialize_as_elf_magic(&instruction.program_id)
                         && borrowed_account.get_data() != *account_info_data =>
                 {
                     panic!("{err:?}");

@@ -732,6 +732,34 @@ impl InstructionContext {
     }
 }
 
+// Mainnet-beta program_ids that cannot deal with serializing executable accounts zero-length
+solana_sdk::pubkeys!(
+    program_ids_exe_zero_length_exceptions,
+    [
+        "7K3UpbZViPnQDLn2DAM853B9J5GBxd1L1rLHy4KqSmWG",
+        "5mpjDRgoRYRmSnAXZTfB2bBkbpwvRjobXUjb4WYjF225",
+        "SRDmexy38YTqtCmh7xU2eMFkWweYWF1pqdPyatTF1qP", // NO ELF MAGIC
+        /*
+        "Program log: Instruction: CykuraSwap",
+        "Program cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8 invoke [3]",
+        "Program log: Instruction: ExactInputSingle",
+        "Program log: ProgramError caused by account: core_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid.",
+        */
+        "cysPXAjehMpVKUapzbMCCnpFxUFFryEWEaLgnb9NrR8",
+        /*
+        "Program 6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc invoke [1]",
+        "Program log: TestMode : 0",
+        "Program log: [from bot] Profitability : 1.036820375 Slot : 237528550 Dropped Slot : 0",
+        "Program log: panicked at 'index out of bounds: the len is 0 but the index is 291', src/exchange/orca.rs:41:22",
+        */
+        "6e84wdHBa1joDWcyL7FZG9Fi2BtYTmvDNKfW2f8fNXnc",
+        /*
+        "Program log: ProgramError caused by account: mine_program. Error Code: InvalidAccountData. Error Number: 17179869184. Error Message: An account's data contents was invalid."
+        */
+        "SPQR4kT3q2oUKEJes2L6NNSBCiPW9SfuhkuqC9bp6Sx", // NO ELF MAGIC
+    ]
+);
+
 /// Shared account borrowed from the TransactionContext and an InstructionContext.
 #[derive(Debug)]
 pub struct BorrowedAccount<'a> {
@@ -770,8 +798,11 @@ impl<'a> BorrowedAccount<'a> {
 
     /// Should this account be serialized with zero length? This is to avoid serializing large
     /// executable accounts.
-    pub fn serialize_as_elf_magic(&self) -> bool {
-        if !self.is_executable() || self.is_writable() {
+    pub fn serialize_as_elf_magic(&self, program_id: &Pubkey) -> bool {
+        if !self.is_executable()
+            || self.is_writable()
+            || program_ids_exe_zero_length_exceptions().contains(program_id)
+        {
             false
         } else {
             true
@@ -873,9 +904,11 @@ impl<'a> BorrowedAccount<'a> {
     }
 
     /// Returns a read-only slice of the account data (transaction wide)
-    #[inline]
-    pub fn get_serialized_data(&self) -> &[u8] {
-        if !self.is_executable() || self.is_writable() {
+    pub fn get_serialized_data(&self, program_id: &Pubkey) -> &[u8] {
+        if !self.is_executable()
+            || self.is_writable()
+            || program_ids_exe_zero_length_exceptions().contains(program_id)
+        {
             self.account.data()
         } else {
             b"ELF\x7f"
