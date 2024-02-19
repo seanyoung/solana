@@ -28,24 +28,7 @@ use {
         timings::{ExecuteDetailsTimings, ExecuteTimingType, ExecuteTimings},
     },
     solana_sdk::{
-        account::{AccountSharedData, ReadableAccount, PROGRAM_OWNERS},
-        account_utils::StateMut,
-        bpf_loader_upgradeable::{self, UpgradeableLoaderState},
-        clock::{Epoch, Slot},
-        epoch_schedule::EpochSchedule,
-        feature_set::FeatureSet,
-        fee::FeeStructure,
-        hash::Hash,
-        inner_instruction::{InnerInstruction, InnerInstructionsList},
-        instruction::{CompiledInstruction, InstructionError, TRANSACTION_LEVEL_STACK_HEIGHT},
-        loader_v4::{self, LoaderV4State, LoaderV4Status},
-        message::SanitizedMessage,
-        native_loader,
-        pubkey::Pubkey,
-        rent_collector::RentCollector,
-        saturating_add_assign,
-        transaction::{self, SanitizedTransaction, TransactionError},
-        transaction_context::{ExecutionRecord, TransactionContext},
+        account::{AccountSharedData, ReadableAccount, PROGRAM_OWNERS}, account_utils::StateMut, bpf_loader_upgradeable::{self, UpgradeableLoaderState}, clock::{Epoch, Slot}, epoch_schedule::EpochSchedule, feature_set::FeatureSet, fee::FeeStructure, hash::Hash, inner_instruction::{InnerInstruction, InnerInstructionsList}, instruction::{CompiledInstruction, InstructionError, TRANSACTION_LEVEL_STACK_HEIGHT}, lamports, loader_v4::{self, LoaderV4State, LoaderV4Status}, message::SanitizedMessage, native_loader, pubkey::Pubkey, rent_collector::RentCollector, saturating_add_assign, sysvar::rent, transaction::{self, SanitizedTransaction, TransactionError}, transaction_context::{ExecutionRecord, TransactionContext}
     },
     std::{
         cell::RefCell,
@@ -684,6 +667,8 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
                         program_account.data(),
                         program_account.owner(),
                         program_account.data().len(),
+                        program_account.rent_epoch(),
+                        program_account.lamports(),
                         0,
                         environments.program_runtime_v1.clone(),
                         reload,
@@ -708,6 +693,8 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
                                 .data()
                                 .len()
                                 .saturating_add(programdata_account.data().len()),
+                            program_account.rent_epoch(),
+                            program_account.lamports(),
                             slot,
                             environments.program_runtime_v1.clone(),
                             reload,
@@ -726,6 +713,8 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
                                 elf_bytes,
                                 &loader_v4::id(),
                                 program_account.data().len(),
+                                program_account.rent_epoch(),
+                                program_account.lamports(),
                                 slot,
                                 environments.program_runtime_v2.clone(),
                                 reload,
@@ -758,6 +747,8 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         programdata: &[u8],
         loader_key: &Pubkey,
         account_size: usize,
+        rent_epoch: u64,
+        lamports: u64,
         deployment_slot: Slot,
         program_runtime_environment: ProgramRuntimeEnvironment,
         reloading: bool,
@@ -772,6 +763,8 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
                     deployment_slot.saturating_add(DELAY_VISIBILITY_SLOT_OFFSET),
                     programdata,
                     account_size,
+                    rent_epoch,
+                    lamports,
                     load_program_metrics,
                 )
             }
@@ -783,6 +776,8 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
                 deployment_slot.saturating_add(DELAY_VISIBILITY_SLOT_OFFSET),
                 programdata,
                 account_size,
+                rent_epoch,
+                lamports,
                 load_program_metrics,
             )
         }

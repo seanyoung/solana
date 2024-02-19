@@ -18,6 +18,7 @@ use {
         clock::{Epoch, Slot},
         loader_v4,
         pubkey::Pubkey,
+        rent_collector::RENT_EXEMPT_RENT_EPOCH,
         saturating_add_assign,
     },
     std::{
@@ -133,6 +134,10 @@ pub struct LoadedProgram {
     pub program: LoadedProgramType,
     /// Size of account that stores the program and program data
     pub account_size: usize,
+    /// lamoports for the program account
+    pub lamports: u64,
+    /// rent epoch for the program account
+    pub rent_epoch: u64,
     /// Slot in which the program was (re)deployed
     pub deployment_slot: Slot,
     /// Slot in which this entry will become active (can be in the future)
@@ -282,6 +287,8 @@ impl LoadedProgram {
         effective_slot: Slot,
         elf_bytes: &[u8],
         account_size: usize,
+        rent_epoch: u64,
+        lamports: u64,
         metrics: &mut LoadProgramMetrics,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Self::new_internal(
@@ -291,6 +298,8 @@ impl LoadedProgram {
             effective_slot,
             elf_bytes,
             account_size,
+            rent_epoch,
+            lamports,
             metrics,
             false, /* reloading */
         )
@@ -311,6 +320,8 @@ impl LoadedProgram {
         effective_slot: Slot,
         elf_bytes: &[u8],
         account_size: usize,
+        rent_epoch: u64,
+        lamports: u64,
         metrics: &mut LoadProgramMetrics,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Self::new_internal(
@@ -320,6 +331,8 @@ impl LoadedProgram {
             effective_slot,
             elf_bytes,
             account_size,
+            rent_epoch,
+            lamports,
             metrics,
             true, /* reloading */
         )
@@ -332,6 +345,8 @@ impl LoadedProgram {
         effective_slot: Slot,
         elf_bytes: &[u8],
         account_size: usize,
+        rent_epoch: u64,
+        lamports: u64,
         metrics: &mut LoadProgramMetrics,
         reloading: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -373,6 +388,8 @@ impl LoadedProgram {
         Ok(Self {
             deployment_slot,
             account_size,
+            rent_epoch,
+            lamports,
             effective_slot,
             tx_usage_counter: AtomicU64::new(0),
             program,
@@ -390,6 +407,8 @@ impl LoadedProgram {
             tx_usage_counter: AtomicU64::new(self.tx_usage_counter.load(Ordering::Relaxed)),
             ix_usage_counter: AtomicU64::new(self.ix_usage_counter.load(Ordering::Relaxed)),
             latest_access_slot: AtomicU64::new(self.latest_access_slot.load(Ordering::Relaxed)),
+            rent_epoch: self.rent_epoch,
+            lamports: self.lamports,
         })
     }
 
@@ -411,6 +430,8 @@ impl LoadedProgram {
             program: LoadedProgramType::Builtin(BuiltinProgram::new_builtin(function_registry)),
             ix_usage_counter: AtomicU64::new(0),
             latest_access_slot: AtomicU64::new(0),
+            lamports: 0,
+            rent_epoch: RENT_EXEMPT_RENT_EPOCH,
         }
     }
 
@@ -423,6 +444,8 @@ impl LoadedProgram {
             tx_usage_counter: AtomicU64::default(),
             ix_usage_counter: AtomicU64::default(),
             latest_access_slot: AtomicU64::new(0),
+            lamports: 0,
+            rent_epoch: 0,
         };
         debug_assert!(tombstone.is_tombstone());
         tombstone
@@ -1177,7 +1200,7 @@ mod tests {
         assert_matches::assert_matches,
         percentage::Percentage,
         solana_rbpf::program::BuiltinProgram,
-        solana_sdk::{clock::Slot, pubkey::Pubkey},
+        solana_sdk::{clock::Slot, pubkey::Pubkey, rent_collector::RENT_EXEMPT_RENT_EPOCH},
         std::{
             ops::ControlFlow,
             sync::{
@@ -1216,6 +1239,8 @@ mod tests {
             tx_usage_counter: usage_counter,
             ix_usage_counter: AtomicU64::default(),
             latest_access_slot: AtomicU64::new(deployment_slot),
+            rent_epoch: 0,
+            lamports: 0,
         })
     }
 
@@ -1228,6 +1253,8 @@ mod tests {
             tx_usage_counter: AtomicU64::default(),
             ix_usage_counter: AtomicU64::default(),
             latest_access_slot: AtomicU64::default(),
+            rent_epoch: RENT_EXEMPT_RENT_EPOCH,
+            lamports: 0,
         })
     }
 
@@ -1256,6 +1283,8 @@ mod tests {
                 tx_usage_counter: AtomicU64::default(),
                 ix_usage_counter: AtomicU64::default(),
                 latest_access_slot: AtomicU64::default(),
+                rent_epoch: 0,
+                lamports: 0,
             }
             .to_unloaded()
             .expect("Failed to unload the program"),
@@ -1852,6 +1881,8 @@ mod tests {
             tx_usage_counter: AtomicU64::default(),
             ix_usage_counter: AtomicU64::default(),
             latest_access_slot: AtomicU64::default(),
+            rent_epoch: RENT_EXEMPT_RENT_EPOCH,
+            lamports: 0,
         });
         let (existing, program) = cache.replenish(program1, updated_program.clone());
         assert!(!existing);

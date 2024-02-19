@@ -9,7 +9,7 @@ use {
     solana_accounts_db::accounts::{LoadedTransaction, TransactionLoadResult, TransactionRent},
     solana_program_runtime::{
         compute_budget_processor::process_compute_budget_instructions,
-        loaded_programs::LoadedProgramsForTxBatch,
+        loaded_programs::{LoadedProgram, LoadedProgramsForTxBatch},
     },
     solana_sdk::{
         account::{
@@ -162,7 +162,7 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                     account_overrides.and_then(|overrides| overrides.get(key))
                 {
                     (account_override.data().len(), account_override.clone(), 0)
-                } else if let Some(account_size) = elide_loading_program(
+                } else if let Some(program) = elide_loading_program(
                     key,
                     message.is_writable(i),
                     instruction_account,
@@ -171,7 +171,7 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 ) {
                     // Optimization to skip loading of accounts which are only used as
                     // programs in top-level instructions and not passed as instruction accounts.
-                    account_shared_data_from_program(key, program_accounts)
+                    account_shared_data_from_program(key, program, program_accounts)
                         .map(|program_account| (account_size, program_account, 0))?
                 } else {
                     callbacks
@@ -340,7 +340,7 @@ fn elide_loading_program(
     instruction_account: bool,
     feature_set: &Arc<FeatureSet>,
     loaded_programs: &LoadedProgramsForTxBatch,
-) -> Option<usize> {
+) -> Option<Arc<LoadedProgram>> {
     // if the account is writable, we have to load it
     if writable {
         return None;
@@ -349,21 +349,21 @@ fn elide_loading_program(
     // It has to be an executable program account
     let program = loaded_programs.find(key)?;
 
-    if program.is_builtin() {
-        return None;
-    }
-
     // If the account is not passed as instruction accounts, we can simply avoid loading it
     if !instruction_account {
         // previous code used correct account size here; not sure this actually matters
-        Some(program.account_size)
+        Some(program)
     } else if feature_set.is_active(&dont_serialize_executable_accounts::id()) {
+        if program.is_builtin() {
+            return None;
+        }
+
         // Serialize programs as zero-length if the feature is enabled
         // Set of programs that do not handle executables serialized as zero length
         if feature_set.is_active(&dont_serialize_executable_accounts_no_exceptions::id())
             || !program_ids_exe_zero_length_exceptions().contains(key)
         {
-            Some(program.account_size)
+            Some(program)
         } else {
             None
         }
@@ -396,6 +396,7 @@ fn get_requested_loaded_accounts_data_size_limit(
 
 fn account_shared_data_from_program(
     key: &Pubkey,
+    program: Arc<LoadedProgram>,
     program_accounts: &HashMap<Pubkey, (&Pubkey, u64)>,
 ) -> Result<AccountSharedData> {
     // It's an executable program account. The program is already loaded in the cache.
@@ -408,7 +409,8 @@ fn account_shared_data_from_program(
     program_account.set_owner(**program_owner);
     program_account.set_executable(true);
     program_account.set_data_from_slice(create_executable_meta(program_owner));
-    program_account.set_rent_epoch(u64::MAX);
+    program_account.set_rent_epoch(program.rent_epoch);
+    program_account.set_lamports(program.lamports);
 
     Ok(program_account)
 }

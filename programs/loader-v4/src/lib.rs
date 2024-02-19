@@ -26,6 +26,7 @@ use {
         loader_v4_instruction::LoaderV4Instruction,
         program_utils::limited_deserialize,
         pubkey::Pubkey,
+        rent_collector::RENT_EXEMPT_RENT_EPOCH,
         saturating_add_assign,
         transaction_context::{BorrowedAccount, InstructionContext},
     },
@@ -420,6 +421,7 @@ pub fn process_instruction_deploy(
         effective_slot,
         programdata,
         buffer.get_data().len(),
+        RENT_EXEMPT_RENT_EPOCH,
         &mut load_program_metrics,
     )
     .map_err(|err| {
@@ -660,6 +662,8 @@ mod tests {
                         0,
                         programdata,
                         account.data().len(),
+                        account.rent_epoch(),
+                        account.lamports(),
                         &mut load_program_metrics,
                     ) {
                         invoke_context.programs_modified_by_tx.set_slot_for_tests(0);
