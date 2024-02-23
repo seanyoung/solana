@@ -174,13 +174,22 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 {
                     // Optimization to skip loading of accounts which are only used as
                     // programs in top-level instructions and not passed as instruction accounts.
-                    account_shared_data_from_program(key, program_accounts)
-                        .map(|program_account| (program.account_size, program_account, 0))?
+                    account_shared_data_from_program(key, program_accounts).map(
+                        |mut program_account| {
+                            program_account.set_executable(
+                                is_builtin(&program_account)
+                                    || is_executable(&program_account, &feature_set),
+                            );
+
+                            (program.account_size, program_account, 0)
+                        },
+                    )?
                 } else {
                     callbacks
                         .get_account_shared_data(key)
                         .map(|mut account| {
                             if message.is_writable(i) {
+                                account.set_executable(false);
                                 if !feature_set
                                     .is_active(&feature_set::disable_rent_fees_collection::id())
                                 {
@@ -202,6 +211,12 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                                     (account.data().len(), account, 0)
                                 }
                             } else {
+                                account.set_executable(
+                                    program_accounts.contains_key(key)
+                                        && (is_builtin(&account)
+                                            || is_executable(&account, &feature_set)),
+                                );
+
                                 (account.data().len(), account, 0)
                             }
                         })
@@ -285,7 +300,7 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 return Err(TransactionError::ProgramAccountNotFound);
             }
 
-            if !(is_builtin(program_account) || is_executable(program_account, &feature_set)) {
+            if !program_account.executable() {
                 error_counters.invalid_program_for_execution += 1;
                 return Err(TransactionError::InvalidProgramForExecution);
             }
@@ -305,8 +320,7 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 let owner_index = accounts.len();
                 if let Some(owner_account) = callbacks.get_account_shared_data(owner_id) {
                     if !native_loader::check_id(owner_account.owner())
-                        || !(is_builtin(&owner_account)
-                            || is_executable(&owner_account, &feature_set))
+                        || !owner_account.executable()
                     {
                         error_counters.invalid_program_for_execution += 1;
                         return Err(TransactionError::InvalidProgramForExecution);
