@@ -50,6 +50,7 @@ solana-unified-scheduler-pool = { workspace = true }
 solana-version = { workspace = true }
 solana-vote-program = { workspace = true }
 solana_rbpf = { workspace = true, features = ["debugger"] }
+hex = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
