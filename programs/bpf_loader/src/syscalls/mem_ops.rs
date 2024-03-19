@@ -69,8 +69,10 @@ declare_builtin_function!(
         mem_op_consume(invoke_context, n)?;
 
         if invoke_context
-            .get_feature_set()
-            .is_active(&feature_set::bpf_account_data_direct_mapping::id())
+            .transaction_context
+            .get_current_instruction_context()
+            .unwrap()
+            .direct_mapping_enabled(invoke_context.transaction_context)
         {
             let cmp_result = translate_type_mut::<i32>(
                 memory_mapping,
@@ -125,8 +127,10 @@ declare_builtin_function!(
         mem_op_consume(invoke_context, n)?;
 
         if invoke_context
-            .get_feature_set()
-            .is_active(&feature_set::bpf_account_data_direct_mapping::id())
+            .transaction_context
+            .get_current_instruction_context()
+            .unwrap()
+            .direct_mapping_enabled(invoke_context.transaction_context)
         {
             memset_non_contiguous(dst_addr, c as u8, n, memory_mapping)
         } else {
@@ -150,8 +154,10 @@ fn memmove(
     memory_mapping: &MemoryMapping,
 ) -> Result<u64, Error> {
     if invoke_context
-        .get_feature_set()
-        .is_active(&feature_set::bpf_account_data_direct_mapping::id())
+        .transaction_context
+        .get_current_instruction_context()
+        .unwrap()
+        .direct_mapping_enabled(invoke_context.transaction_context)
     {
         memmove_non_contiguous(dst_addr, src_addr, n, memory_mapping)
     } else {
