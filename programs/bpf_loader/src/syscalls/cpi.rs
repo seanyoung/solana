@@ -107,8 +107,10 @@ impl<'a, 'b> CallerAccount<'a, 'b> {
         account_metadata: &SerializedAccountMetadata,
     ) -> Result<CallerAccount<'a, 'b>, Error> {
         let direct_mapping = invoke_context
-            .feature_set
-            .is_active(&feature_set::bpf_account_data_direct_mapping::id());
+            .transaction_context
+            .get_current_instruction_context()
+            .unwrap()
+            .direct_mapping_enabled(invoke_context.transaction_context);
 
         if direct_mapping {
             check_account_info_pointer(
@@ -244,8 +246,10 @@ impl<'a, 'b> CallerAccount<'a, 'b> {
         account_metadata: &SerializedAccountMetadata,
     ) -> Result<CallerAccount<'a, 'b>, Error> {
         let direct_mapping = invoke_context
-            .feature_set
-            .is_active(&feature_set::bpf_account_data_direct_mapping::id());
+            .transaction_context
+            .get_current_instruction_context()
+            .unwrap()
+            .direct_mapping_enabled(invoke_context.transaction_context);
 
         if direct_mapping {
             check_account_info_pointer(
@@ -866,8 +870,10 @@ where
         .accounts_metadata;
 
     let direct_mapping = invoke_context
-        .feature_set
-        .is_active(&feature_set::bpf_account_data_direct_mapping::id());
+        .transaction_context
+        .get_current_instruction_context()
+        .unwrap()
+        .direct_mapping_enabled(invoke_context.transaction_context);
 
     for (instruction_account_index, instruction_account) in instruction_accounts.iter().enumerate()
     {
@@ -1122,8 +1128,10 @@ fn cpi_common<S: SyscallInvokeSigned>(
     //
     // Synchronize the callee's account changes so the caller can see them.
     let direct_mapping = invoke_context
-        .feature_set
-        .is_active(&feature_set::bpf_account_data_direct_mapping::id());
+        .transaction_context
+        .get_current_instruction_context()
+        .unwrap()
+        .direct_mapping_enabled(invoke_context.transaction_context);
 
     if direct_mapping {
         // Update all perms at once before doing account data updates. This
