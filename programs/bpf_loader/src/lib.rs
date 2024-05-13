@@ -1337,8 +1337,8 @@ fn execute<'a, 'b: 'a>(
     #[cfg(all(not(target_os = "windows"), target_arch = "x86_64"))]
     let use_jit = executable.get_compiled_program().is_some();
     let direct_mapping = invoke_context
-        .feature_set
-        .is_active(&bpf_account_data_direct_mapping::id());
+        .transaction_context
+        .direct_mapping_enabled(&invoke_context.feature_set);
 
     let mut serialize_time = Measure::start("serialize");
     let (parameter_bytes, regions, accounts_metadata) = serialization::serialize_parameters(

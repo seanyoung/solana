@@ -31,7 +31,6 @@ use {
         big_mod_exp::{big_mod_exp, BigModExpParams},
         blake3, bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable,
         entrypoint::{BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, SUCCESS},
-        feature_set::bpf_account_data_direct_mapping,
         feature_set::FeatureSet,
         feature_set::{
             self, blake3_syscall_enabled, curve25519_syscall_enabled,
@@ -286,7 +285,7 @@ pub fn create_program_runtime_environment_v1<'a>(
         max_call_depth: compute_budget.max_call_depth,
         stack_frame_size: compute_budget.stack_frame_size,
         enable_address_translation: true,
-        enable_stack_frame_gaps: !feature_set.is_active(&bpf_account_data_direct_mapping::id()),
+        enable_stack_frame_gaps: false,
         instruction_meter_checkpoint_distance: 10000,
         enable_instruction_meter: true,
         enable_instruction_tracing: debugging_features,
@@ -301,7 +300,7 @@ pub fn create_program_runtime_environment_v1<'a>(
         enable_sbpf_v2: false,
         optimize_rodata: false,
         new_elf_parser: feature_set.is_active(&switch_to_new_elf_parser::id()),
-        aligned_memory_mapping: !feature_set.is_active(&bpf_account_data_direct_mapping::id()),
+        aligned_memory_mapping: false,
         // Warning, do not use `Config::default()` so that configuration here is explicit.
     };
     let mut result = FunctionRegistry::<BuiltinFunction<InvokeContext>>::default();
