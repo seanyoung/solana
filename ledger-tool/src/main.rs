@@ -34,12 +34,17 @@ use {
     solana_ledger::{
         blockstore::{create_new_ledger, Blockstore},
         blockstore_options::{AccessType, LedgerColumnOptions},
-        blockstore_processor::ProcessSlotCallback,
+        blockstore_processor::{
+            ProcessSlotCallback, TransactionStatusMessage, TransactionStatusSender,
+        },
         use_snapshot_archives_at_startup,
     },
     solana_measure::{measure, measure::Measure},
     solana_runtime::{
-        bank::{bank_hash_details, Bank, RewardCalculationEvent, TotalAccountsStats},
+        bank::{
+            bank_hash_details::{self, SlotDetails, TransactionDetails},
+            Bank, RewardCalculationEvent, TotalAccountsStats,
+        },
         bank_forks::BankForks,
         snapshot_archive_info::SnapshotArchiveInfoGetter,
         snapshot_bank_utils,
@@ -65,7 +70,9 @@ use {
         system_program,
         transaction::{MessageHash, SanitizedTransaction, SimpleAddressLoader},
     },
-    solana_stake_program::stake_state::{self, PointValue},
+    solana_stake_program::{stake_state, stake_state::PointValue},
+    solana_transaction_status::UiInstruction,
+    solana_unified_scheduler_pool::DefaultSchedulerPool,
     solana_vote_program::{
         self,
         vote_state::{self, VoteState},
@@ -75,6 +82,7 @@ use {
         ffi::OsStr,
         fs::File,
         io::{self, stdout, Write},
+        mem::swap,
         num::NonZeroUsize,
         path::{Path, PathBuf},
         process::{exit, Command, Stdio},
@@ -1092,10 +1100,15 @@ fn main() {
                 .arg(
                     Arg::with_name("record_slots_config")
                         .long("record-slots-config")
-                        .default_value("hash-only")
-                        .possible_values(&["hash-only", "accounts"])
+                        .multiple(true)
+                        .takes_value(true)
+                        .possible_values(&["accounts", "tx"])
                         .requires("record_slots")
-                        .help("In the slot recording, include bank details or not"),
+                        .conflicts_with_all(&[
+                            "enable_rpc_transaction_history",
+                            "geyser_plugin_config",
+                        ])
+                        .help("In addition to the bank hash, optionally include accounts and/or transactions details for the slot"),
                 ),
         )
         .subcommand(
@@ -1588,6 +1601,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        None,
                     );
 
                     println!(
@@ -1613,6 +1627,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        None,
                     );
                     println!("{}", &bank_forks.read().unwrap().working_bank().hash());
                 }
@@ -1645,6 +1660,9 @@ fn main() {
                         exit(1);
                     }
 
+                    let mut transaction_status_sender = None;
+                    let mut tx_receiver = None;
+
                     let (slot_callback, record_slots_file, recorded_slots) = if arg_matches
                         .occurrences_of("record_slots")
                         > 0
@@ -1656,29 +1674,61 @@ fn main() {
                             exit(1);
                         });
 
-                        let include_bank =
-                            match arg_matches.value_of("record_slots_config").unwrap() {
-                                "hash-only" => false,
-                                "accounts" => true,
-                                _ => unreachable!(),
-                            };
+                        let mut include_bank = false;
+                        let mut include_tx = false;
+
+                        if let Some(args) = arg_matches.values_of("record_slots_config") {
+                            for arg in args {
+                                match arg {
+                                    "tx" => include_tx = true,
+                                    "accounts" => include_bank = true,
+                                    _ => unreachable!(),
+                                }
+                            }
+                        }
 
                         let slot_hashes = Arc::new(Mutex::new(Vec::new()));
+
+                        if include_tx {
+                            let (sender, receiver) = crossbeam_channel::unbounded();
+
+                            transaction_status_sender = Some(TransactionStatusSender { sender });
+
+                            let slots = Arc::clone(&slot_hashes);
+
+                            tx_receiver = Some(std::thread::spawn(move || {
+                                record_transactions(receiver, slots);
+                            }));
+                        }
 
                         let slot_callback = Arc::new({
                             let slots = Arc::clone(&slot_hashes);
                             move |bank: &Bank| {
-                                let slot_details = if include_bank {
-                                    bank_hash_details::BankHashSlotDetails::try_from(bank).unwrap()
+                                let mut details = if include_bank {
+                                    bank_hash_details::SlotDetails::try_from(bank).unwrap()
                                 } else {
-                                    bank_hash_details::BankHashSlotDetails {
+                                    bank_hash_details::SlotDetails {
                                         slot: bank.slot(),
                                         bank_hash: bank.hash().to_string(),
                                         ..Default::default()
                                     }
                                 };
 
-                                slots.lock().unwrap().push(slot_details);
+                                let mut slots = slots.lock().unwrap();
+
+                                if let Some(recorded_slot) =
+                                    slots.iter_mut().find(|f| f.slot == details.slot)
+                                {
+                                    // copy all fields except transactions
+                                    swap(
+                                        &mut recorded_slot.transactions,
+                                        &mut details.transactions,
+                                    );
+
+                                    *recorded_slot = details;
+                                } else {
+                                    slots.push(details);
+                                }
                             }
                         });
 
@@ -1713,7 +1763,7 @@ fn main() {
                                     bank.hash()
                                 );
                             } else {
-                                let bank_hash_details::BankHashSlotDetails {
+                                let bank_hash_details::SlotDetails {
                                     slot: expected_slot,
                                     bank_hash: expected_hash,
                                     ..
@@ -1755,6 +1805,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        transaction_status_sender,
                     );
 
                     if print_accounts_stats {
@@ -1768,6 +1819,10 @@ fn main() {
                                 warn!("Unable to write bank hash_details file: {err}");
                             })
                             .ok();
+                    }
+
+                    if let Some(tx_receiver) = tx_receiver {
+                        tx_receiver.join().unwrap();
                     }
 
                     if let Some(recorded_slots_file) = record_slots_file {
@@ -1812,6 +1867,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        None,
                     );
 
                     let dot = graph_forks(&bank_forks.read().unwrap(), &graph_config);
@@ -1982,6 +2038,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        None,
                     );
                     let mut bank = bank_forks
                         .read()
@@ -2350,6 +2407,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        None,
                     );
 
                     let bank = bank_forks.read().unwrap().working_bank();
@@ -2431,6 +2489,7 @@ fn main() {
                         process_options,
                         snapshot_archive_path,
                         incremental_snapshot_archive_path,
+                        None,
                     );
                     let bank_forks = bank_forks.read().unwrap();
                     let slot = bank_forks.working_bank().slot();
@@ -2951,4 +3010,65 @@ fn main() {
     };
     measure_total_execution_time.stop();
     info!("{}", measure_total_execution_time);
+}
+
+fn record_transactions(
+    recv: crossbeam_channel::Receiver<TransactionStatusMessage>,
+    slots: Arc<Mutex<Vec<SlotDetails>>>,
+) {
+    for tsm in recv {
+        if let TransactionStatusMessage::Batch(batch) = tsm {
+            let slot = batch.bank.slot();
+
+            assert_eq!(batch.transactions.len(), batch.execution_results.len());
+
+            let transactions: Vec<_> = batch
+                .transactions
+                .iter()
+                .zip(batch.execution_results)
+                .zip(batch.transaction_indexes)
+                .map(|((tx, execution_results), index)| {
+                    let message = tx.message();
+
+                    let accounts: Vec<String> = message
+                        .account_keys()
+                        .iter()
+                        .map(|acc| acc.to_string())
+                        .collect();
+
+                    let instructions = message
+                        .instructions()
+                        .iter()
+                        .map(|ix| UiInstruction::parse(ix, &message.account_keys(), None))
+                        .collect();
+
+                    let is_simple_vote_tx = tx.is_simple_vote_transaction();
+
+                    TransactionDetails {
+                        accounts,
+                        instructions,
+                        is_simple_vote_tx,
+                        execution_results,
+                        index,
+                    }
+                })
+                .collect();
+
+            let mut slots = slots.lock().unwrap();
+
+            if let Some(recorded_slot) = slots.iter_mut().find(|f| f.slot == slot) {
+                recorded_slot.transactions.extend(transactions);
+            } else {
+                slots.push(SlotDetails {
+                    slot,
+                    transactions,
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    for slot in slots.lock().unwrap().iter_mut() {
+        slot.transactions.sort_by(|a, b| a.index.cmp(&b.index));
+    }
 }
