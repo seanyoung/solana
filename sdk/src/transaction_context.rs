@@ -23,9 +23,10 @@ use {
     },
     std::{
         cell::{Ref, RefCell, RefMut},
-        collections::HashSet,
+        collections::{HashMap, HashSet},
         pin::Pin,
         rc::Rc,
+        sync::Mutex,
     },
 };
 
@@ -132,7 +133,7 @@ impl TransactionAccounts {
 /// Loaded transaction shared between runtime and programs.
 ///
 /// This context is valid for the entire duration of a transaction being processed.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct TransactionContext {
     account_keys: Pin<Box<[Pubkey]>>,
     accounts: Rc<TransactionAccounts>,
@@ -142,6 +143,8 @@ pub struct TransactionContext {
     instruction_trace: Vec<InstructionContext>,
     return_data: TransactionReturnData,
     accounts_resize_delta: RefCell<i64>,
+    pub reallocs_inc: Mutex<HashMap<Pubkey, i64>>,
+    pub reallocs_dec: Mutex<HashMap<Pubkey, i64>>,
     #[cfg(not(target_os = "solana"))]
     rent: Rent,
     /// Useful for debugging to filter by or to look it up on the explorer
@@ -174,6 +177,8 @@ impl TransactionContext {
             rent,
             #[cfg(all(not(target_os = "solana"), debug_assertions))]
             signature: Signature::default(),
+            reallocs_inc: Mutex::new(HashMap::new()),
+            reallocs_dec: Mutex::new(HashMap::new()),
         }
     }
 

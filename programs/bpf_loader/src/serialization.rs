@@ -398,7 +398,30 @@ pub fn deserialize_parameters_unaligned<I: IntoIterator<Item = usize>>(
                     .can_data_be_resized(data.len())
                     .and_then(|_| borrowed_account.can_data_be_changed())
                 {
-                    Ok(()) => borrowed_account.set_data_from_slice(data)?,
+                    Ok(()) => {
+                        let old_len = borrowed_account.get_data().len();
+                        borrowed_account.set_data_from_slice(data)?;
+                        let new_len = borrowed_account.get_data().len();
+                        let key = borrowed_account.get_key();
+                        if old_len < new_len {
+                            transaction_context
+                                .reallocs_inc
+                                .lock()
+                                .unwrap()
+                                .entry(*key)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                        if old_len > new_len {
+                            transaction_context
+                                .reallocs_dec
+                                .lock()
+                                .unwrap()
+                                .entry(*key)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                    }
                     Err(err) if borrowed_account.get_data() != data => return Err(err),
                     _ => {}
                 }
@@ -556,7 +579,30 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
                     .can_data_be_resized(post_len)
                     .and_then(|_| borrowed_account.can_data_be_changed())
                 {
-                    Ok(()) => borrowed_account.set_data_from_slice(data)?,
+                    Ok(()) => {
+                        let old_len = borrowed_account.get_data().len();
+                        borrowed_account.set_data_from_slice(data)?;
+                        let new_len = borrowed_account.get_data().len();
+                        let key = borrowed_account.get_key();
+                        if old_len < new_len {
+                            transaction_context
+                                .reallocs_inc
+                                .lock()
+                                .unwrap()
+                                .entry(*key)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                        if old_len > new_len {
+                            transaction_context
+                                .reallocs_dec
+                                .lock()
+                                .unwrap()
+                                .entry(*key)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                    }
                     Err(err) if borrowed_account.get_data() != data => return Err(err),
                     _ => {}
                 }
@@ -584,6 +630,25 @@ pub fn deserialize_parameters_aligned<I: IntoIterator<Item = usize>>(
                                     data.get(0..allocated_bytes)
                                         .ok_or(InstructionError::InvalidArgument)?,
                                 );
+                        }
+                        let key = borrowed_account.get_key();
+                        if pre_len < post_len {
+                            transaction_context
+                                .reallocs_inc
+                                .lock()
+                                .unwrap()
+                                .entry(*key)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                        if pre_len > post_len {
+                            transaction_context
+                                .reallocs_dec
+                                .lock()
+                                .unwrap()
+                                .entry(*key)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
                         }
                     }
                     Err(err) if borrowed_account.get_data().len() != post_len => return Err(err),

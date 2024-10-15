@@ -4880,6 +4880,14 @@ impl Bank {
             None
         };
 
+        for (_, inc) in transaction_context.reallocs_inc.lock().unwrap().iter() {
+            datapoint_info!("reallocs", ("inc", *inc, i64));
+        }
+
+        for (_, dec) in transaction_context.reallocs_dec.lock().unwrap().iter() {
+            datapoint_info!("reallocs", ("dec", *dec, i64));
+        }
+
         let ExecutionRecord {
             accounts,
             return_data,
