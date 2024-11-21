@@ -1611,7 +1611,10 @@ mod tests {
             invoke_context::SerializedAccountMetadata, with_mock_invoke_context,
         },
         solana_rbpf::{
-            ebpf::MM_INPUT_START, memory_region::MemoryRegion, program::SBPFVersion, vm::Config,
+            ebpf::MM_INPUT_START,
+            memory_region::{MemoryRegion, RegionContents},
+            program::SBPFVersion,
+            vm::Config,
         },
         solana_sdk::{
             account::{Account, AccountSharedData, ReadableAccount},
@@ -2647,18 +2650,27 @@ mod tests {
                 } else {
                     data.len() + MAX_PERMITTED_DATA_INCREASE
                 };
-            regions.push(MemoryRegion::new_writable(&mut d[..region_len], vm_addr));
+            regions.push(MemoryRegion::new_writable(
+                &mut d[..region_len],
+                vm_addr,
+                RegionContents::Normal,
+            ));
             region_addr += region_len as u64;
 
             if direct_mapping {
                 // create a region for the directly mapped data
-                regions.push(MemoryRegion::new_readonly(data, region_addr));
+                regions.push(MemoryRegion::new_readonly(
+                    data,
+                    region_addr,
+                    RegionContents::Normal,
+                ));
                 region_addr += data.len() as u64;
 
                 // create a region for the realloc padding
                 regions.push(MemoryRegion::new_writable(
                     &mut d[mem::size_of::<u64>()..],
                     region_addr,
+                    RegionContents::Normal,
                 ));
             } else {
                 // caller_account.serialized_data must have the actual data length
@@ -2799,7 +2811,11 @@ mod tests {
                 data[data_addr - vm_addr..].copy_from_slice(&self.data);
             }
 
-            let region = MemoryRegion::new_writable(data.as_mut_slice(), vm_addr as u64);
+            let region = MemoryRegion::new_writable(
+                data.as_mut_slice(),
+                vm_addr as u64,
+                RegionContents::Normal,
+            );
             (data, region)
         }
     }
@@ -2854,7 +2870,8 @@ mod tests {
             p2 += signer_length;
         }
 
-        let region = MemoryRegion::new_writable(data.as_mut_slice(), vm_addr as u64);
+        let region =
+            MemoryRegion::new_writable(data.as_mut_slice(), vm_addr as u64, RegionContents::Normal);
         (data, region)
     }
 
@@ -2943,7 +2960,11 @@ mod tests {
                 data[data_addr - vm_addr..].copy_from_slice(self.data);
             }
 
-            let region = MemoryRegion::new_writable(data.as_mut_slice(), vm_addr as u64);
+            let region = MemoryRegion::new_writable(
+                data.as_mut_slice(),
+                vm_addr as u64,
+                RegionContents::Normal,
+            );
             (
                 data,
                 region,

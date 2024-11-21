@@ -1,6 +1,9 @@
 use {
     super::*,
-    solana_rbpf::{error::EbpfError, memory_region::MemoryRegion},
+    solana_rbpf::{
+        error::EbpfError,
+        memory_region::{MemoryRegion, RegionContents},
+    },
     std::slice,
 };
 
@@ -398,6 +401,7 @@ struct MemoryChunkIterator<'a> {
     // exclusive end index (start + len, so one past the last valid address)
     vm_addr_end: u64,
     len: u64,
+    is_account: Option<bool>,
 }
 
 impl<'a> MemoryChunkIterator<'a> {
@@ -420,6 +424,7 @@ impl<'a> MemoryChunkIterator<'a> {
             len,
             vm_addr_start: vm_addr,
             vm_addr_end,
+            is_account: None,
         })
     }
 
@@ -459,6 +464,18 @@ impl<'a> Iterator for MemoryChunkIterator<'a> {
                 return Some(Err(e));
             }
         };
+
+        let is_account = region.contents == RegionContents::Account
+            || region.contents == RegionContents::AccountResize;
+
+        match self.is_account {
+            None => self.is_account = Some(is_account),
+            Some(last) => {
+                if last != is_account {
+                    return Some(Err(SyscallError::InvalidLength.into()));
+                }
+            }
+        }
 
         let vm_addr = self.vm_addr_start;
 
@@ -562,7 +579,11 @@ mod tests {
         };
         let mem1 = vec![0xFF; 42];
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START)],
+            vec![MemoryRegion::new_readonly(
+                &mem1,
+                MM_PROGRAM_START,
+                RegionContents::Normal,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -618,7 +639,11 @@ mod tests {
         };
         let mem1 = vec![0xFF; 42];
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START)],
+            vec![MemoryRegion::new_readonly(
+                &mem1,
+                MM_PROGRAM_START,
+                RegionContents::Normal,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -671,8 +696,8 @@ mod tests {
         let mem2 = vec![0x22; 4];
         let memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START),
-                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8),
+                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START, RegionContents::Normal),
+                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8, RegionContents::Normal),
             ],
             &config,
             &SBPFVersion::V2,
@@ -714,8 +739,8 @@ mod tests {
         let mem2 = vec![0x22; 4];
         let memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START),
-                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8),
+                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START, RegionContents::Normal),
+                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8, RegionContents::Normal),
             ],
             &config,
             &SBPFVersion::V2,
@@ -764,8 +789,8 @@ mod tests {
         let mem2 = vec![0x22; 4];
         let memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START),
-                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8),
+                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START, RegionContents::Normal),
+                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8, RegionContents::Normal),
             ],
             &config,
             &SBPFVersion::V2,
@@ -841,8 +866,8 @@ mod tests {
         let mem2 = vec![0x22; 4];
         let memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_writable(&mut mem1, MM_PROGRAM_START),
-                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8),
+                MemoryRegion::new_writable(&mut mem1, MM_PROGRAM_START, RegionContents::Normal),
+                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 8, RegionContents::Normal),
             ],
             &config,
             &SBPFVersion::V2,
@@ -867,10 +892,10 @@ mod tests {
         let mut mem4 = vec![0x44; 4];
         let memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START),
-                MemoryRegion::new_writable(&mut mem2, MM_PROGRAM_START + 1),
-                MemoryRegion::new_writable(&mut mem3, MM_PROGRAM_START + 3),
-                MemoryRegion::new_writable(&mut mem4, MM_PROGRAM_START + 6),
+                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START, RegionContents::Normal),
+                MemoryRegion::new_writable(&mut mem2, MM_PROGRAM_START + 1, RegionContents::Normal),
+                MemoryRegion::new_writable(&mut mem3, MM_PROGRAM_START + 3, RegionContents::Normal),
+                MemoryRegion::new_writable(&mut mem4, MM_PROGRAM_START + 6, RegionContents::Normal),
             ],
             &config,
             &SBPFVersion::V2,
@@ -898,9 +923,9 @@ mod tests {
         let mem3 = b"foobarbad".to_vec();
         let memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START),
-                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 3),
-                MemoryRegion::new_readonly(&mem3, MM_PROGRAM_START + 9),
+                MemoryRegion::new_readonly(&mem1, MM_PROGRAM_START, RegionContents::Normal),
+                MemoryRegion::new_readonly(&mem2, MM_PROGRAM_START + 3, RegionContents::Normal),
+                MemoryRegion::new_readonly(&mem3, MM_PROGRAM_START + 9, RegionContents::Normal),
             ],
             &config,
             &SBPFVersion::V2,
@@ -955,6 +980,7 @@ mod tests {
             regs.push(MemoryRegion::new_writable(
                 &mut mem[i],
                 MM_PROGRAM_START + offset as u64,
+                RegionContents::Normal,
             ));
             offset += *region_len;
         }

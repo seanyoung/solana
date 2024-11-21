@@ -27,7 +27,9 @@ use {
         ebpf::{self, MM_HEAP_START},
         elf::Executable,
         error::{EbpfError, ProgramResult},
-        memory_region::{AccessType, MemoryCowCallback, MemoryMapping, MemoryRegion},
+        memory_region::{
+            AccessType, MemoryCowCallback, MemoryMapping, MemoryRegion, RegionContents,
+        },
         program::BuiltinProgram,
         verifier::RequisiteVerifier,
         vm::{ContextObject, EbpfVm},
@@ -368,8 +370,9 @@ fn create_memory_mapping<'a, 'b, C: ContextObject>(
             } else {
                 0
             },
+            RegionContents::Normal,
         ),
-        MemoryRegion::new_writable(heap, MM_HEAP_START),
+        MemoryRegion::new_writable(heap, MM_HEAP_START, RegionContents::Normal),
     ]
     .into_iter()
     .chain(additional_regions)
