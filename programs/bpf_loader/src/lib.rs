@@ -368,8 +368,9 @@ fn create_memory_mapping<'a, 'b, C: ContextObject>(
             } else {
                 0
             },
+            false,
         ),
-        MemoryRegion::new_writable(heap, MM_HEAP_START),
+        MemoryRegion::new_writable(heap, MM_HEAP_START, false),
     ]
     .into_iter()
     .chain(additional_regions)

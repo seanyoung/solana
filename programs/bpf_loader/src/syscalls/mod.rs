@@ -2189,7 +2189,7 @@ mod tests {
         let addr = data.as_ptr() as u64;
         let config = Config::default();
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(&data, START)],
+            vec![MemoryRegion::new_readonly(&data, START, false)],
             &config,
             &SBPFVersion::V2,
         )
@@ -2230,7 +2230,11 @@ mod tests {
         // Pubkey
         let pubkey = solana_sdk::pubkey::new_rand();
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(bytes_of(&pubkey), 0x100000000)],
+            vec![MemoryRegion::new_readonly(
+                bytes_of(&pubkey),
+                0x100000000,
+                false,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -2246,14 +2250,15 @@ mod tests {
             vec![AccountMeta::new(solana_sdk::pubkey::new_rand(), false)],
         );
         let instruction = StableInstruction::from(instruction);
-        let memory_region = MemoryRegion::new_readonly(bytes_of(&instruction), 0x100000000);
+        let memory_region = MemoryRegion::new_readonly(bytes_of(&instruction), 0x100000000, false);
         let memory_mapping =
             MemoryMapping::new(vec![memory_region], &config, &SBPFVersion::V2).unwrap();
         let translated_instruction =
             translate_type::<StableInstruction>(&memory_mapping, 0x100000000, true).unwrap();
         assert_eq!(instruction, *translated_instruction);
 
-        let memory_region = MemoryRegion::new_readonly(&bytes_of(&instruction)[..1], 0x100000000);
+        let memory_region =
+            MemoryRegion::new_readonly(&bytes_of(&instruction)[..1], 0x100000000, false);
         let memory_mapping =
             MemoryMapping::new(vec![memory_region], &config, &SBPFVersion::V2).unwrap();
         assert!(translate_type::<Instruction>(&memory_mapping, 0x100000000, true).is_err());
@@ -2268,7 +2273,7 @@ mod tests {
         let data: Vec<u8> = vec![];
         assert_eq!(0x1 as *const u8, data.as_ptr());
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(&good_data, 0x100000000)],
+            vec![MemoryRegion::new_readonly(&good_data, 0x100000000, false)],
             &config,
             &SBPFVersion::V2,
         )
@@ -2281,7 +2286,7 @@ mod tests {
         // u8
         let mut data = vec![1u8, 2, 3, 4, 5];
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(&data, 0x100000000)],
+            vec![MemoryRegion::new_readonly(&data, 0x100000000, false)],
             &config,
             &SBPFVersion::V2,
         )
@@ -2306,6 +2311,7 @@ mod tests {
             vec![MemoryRegion::new_readonly(
                 bytes_of_slice(&data),
                 0x100000000,
+                false,
             )],
             &config,
             &SBPFVersion::V2,
@@ -2326,6 +2332,7 @@ mod tests {
                     slice::from_raw_parts(data.as_ptr() as *const u8, mem::size_of::<Pubkey>() * 5)
                 },
                 0x100000000,
+                false,
             )],
             &config,
             &SBPFVersion::V2,
@@ -2344,7 +2351,11 @@ mod tests {
         let string = "Gaggablaghblagh!";
         let config = Config::default();
         let memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(string.as_bytes(), 0x100000000)],
+            vec![MemoryRegion::new_readonly(
+                string.as_bytes(),
+                0x100000000,
+                false,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -2383,7 +2394,11 @@ mod tests {
         let string = "Gaggablaghblagh!";
         let config = Config::default();
         let mut memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(string.as_bytes(), 0x100000000)],
+            vec![MemoryRegion::new_readonly(
+                string.as_bytes(),
+                0x100000000,
+                false,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -2424,7 +2439,11 @@ mod tests {
         let string = "Gaggablaghblagh!";
         let config = Config::default();
         let mut memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(string.as_bytes(), 0x100000000)],
+            vec![MemoryRegion::new_readonly(
+                string.as_bytes(),
+                0x100000000,
+                false,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -2515,7 +2534,11 @@ mod tests {
         let pubkey = Pubkey::from_str("MoqiU1vryuCGQSxFKA1SZ316JdLEFFhoAu6cKUNk7dN").unwrap();
         let config = Config::default();
         let mut memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_readonly(bytes_of(&pubkey), 0x100000000)],
+            vec![MemoryRegion::new_readonly(
+                bytes_of(&pubkey),
+                0x100000000,
+                false,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -2694,10 +2717,10 @@ mod tests {
         let rw_va = 0x200000000;
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(bytes_of_slice(&bytes_to_hash), ro_va),
-                MemoryRegion::new_writable(bytes_of_slice_mut(&mut hash_result), rw_va),
-                MemoryRegion::new_readonly(bytes1.as_bytes(), bytes_to_hash[0].vm_addr),
-                MemoryRegion::new_readonly(bytes2.as_bytes(), bytes_to_hash[1].vm_addr),
+                MemoryRegion::new_readonly(bytes_of_slice(&bytes_to_hash), ro_va, false),
+                MemoryRegion::new_writable(bytes_of_slice_mut(&mut hash_result), rw_va, false),
+                MemoryRegion::new_readonly(bytes1.as_bytes(), bytes_to_hash[0].vm_addr, false),
+                MemoryRegion::new_readonly(bytes2.as_bytes(), bytes_to_hash[1].vm_addr, false),
             ],
             &config,
             &SBPFVersion::V2,
@@ -2794,8 +2817,8 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&valid_bytes, valid_bytes_va),
-                MemoryRegion::new_readonly(&invalid_bytes, invalid_bytes_va),
+                MemoryRegion::new_readonly(&valid_bytes, valid_bytes_va, false),
+                MemoryRegion::new_readonly(&invalid_bytes, invalid_bytes_va, false),
             ],
             &config,
             &SBPFVersion::V2,
@@ -2867,8 +2890,8 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&valid_bytes, valid_bytes_va),
-                MemoryRegion::new_readonly(&invalid_bytes, invalid_bytes_va),
+                MemoryRegion::new_readonly(&valid_bytes, valid_bytes_va, false),
+                MemoryRegion::new_readonly(&invalid_bytes, invalid_bytes_va, false),
             ],
             &config,
             &SBPFVersion::V2,
@@ -2951,11 +2974,15 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(bytes_of_slice(&left_point), left_point_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&right_point), right_point_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&scalar), scalar_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&invalid_point), invalid_point_va),
-                MemoryRegion::new_writable(bytes_of_slice_mut(&mut result_point), result_point_va),
+                MemoryRegion::new_readonly(bytes_of_slice(&left_point), left_point_va, false),
+                MemoryRegion::new_readonly(bytes_of_slice(&right_point), right_point_va, false),
+                MemoryRegion::new_readonly(bytes_of_slice(&scalar), scalar_va, false),
+                MemoryRegion::new_readonly(bytes_of_slice(&invalid_point), invalid_point_va, false),
+                MemoryRegion::new_writable(
+                    bytes_of_slice_mut(&mut result_point),
+                    result_point_va,
+                    false,
+                ),
             ],
             &config,
             &SBPFVersion::V2,
@@ -3106,11 +3133,15 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(bytes_of_slice(&left_point), left_point_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&right_point), right_point_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&scalar), scalar_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&invalid_point), invalid_point_va),
-                MemoryRegion::new_writable(bytes_of_slice_mut(&mut result_point), result_point_va),
+                MemoryRegion::new_readonly(bytes_of_slice(&left_point), left_point_va, false),
+                MemoryRegion::new_readonly(bytes_of_slice(&right_point), right_point_va, false),
+                MemoryRegion::new_readonly(bytes_of_slice(&scalar), scalar_va, false),
+                MemoryRegion::new_readonly(bytes_of_slice(&invalid_point), invalid_point_va, false),
+                MemoryRegion::new_writable(
+                    bytes_of_slice_mut(&mut result_point),
+                    result_point_va,
+                    false,
+                ),
             ],
             &config,
             &SBPFVersion::V2,
@@ -3277,10 +3308,22 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(bytes_of_slice(&scalars), scalars_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&edwards_points), edwards_points_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&ristretto_points), ristretto_points_va),
-                MemoryRegion::new_writable(bytes_of_slice_mut(&mut result_point), result_point_va),
+                MemoryRegion::new_readonly(bytes_of_slice(&scalars), scalars_va, false),
+                MemoryRegion::new_readonly(
+                    bytes_of_slice(&edwards_points),
+                    edwards_points_va,
+                    false,
+                ),
+                MemoryRegion::new_readonly(
+                    bytes_of_slice(&ristretto_points),
+                    ristretto_points_va,
+                    false,
+                ),
+                MemoryRegion::new_writable(
+                    bytes_of_slice_mut(&mut result_point),
+                    result_point_va,
+                    false,
+                ),
             ],
             &config,
             &SBPFVersion::V2,
@@ -3370,10 +3413,22 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(bytes_of_slice(&scalars), scalars_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&edwards_points), edwards_points_va),
-                MemoryRegion::new_readonly(bytes_of_slice(&ristretto_points), ristretto_points_va),
-                MemoryRegion::new_writable(bytes_of_slice_mut(&mut result_point), result_point_va),
+                MemoryRegion::new_readonly(bytes_of_slice(&scalars), scalars_va, false),
+                MemoryRegion::new_readonly(
+                    bytes_of_slice(&edwards_points),
+                    edwards_points_va,
+                    false,
+                ),
+                MemoryRegion::new_readonly(
+                    bytes_of_slice(&ristretto_points),
+                    ristretto_points_va,
+                    false,
+                ),
+                MemoryRegion::new_writable(
+                    bytes_of_slice_mut(&mut result_point),
+                    result_point_va,
+                    false,
+                ),
             ],
             &config,
             &SBPFVersion::V2,
@@ -3556,9 +3611,13 @@ mod tests {
 
             let mut memory_mapping = MemoryMapping::new(
                 vec![
-                    MemoryRegion::new_writable(bytes_of_mut(&mut got_clock_obj), got_clock_obj_va),
-                    MemoryRegion::new_writable(&mut got_clock_buf, got_clock_buf_va),
-                    MemoryRegion::new_readonly(&Clock::id().to_bytes(), clock_id_va),
+                    MemoryRegion::new_writable(
+                        bytes_of_mut(&mut got_clock_obj),
+                        got_clock_obj_va,
+                        false,
+                    ),
+                    MemoryRegion::new_writable(&mut got_clock_buf, got_clock_buf_va, false),
+                    MemoryRegion::new_readonly(&Clock::id().to_bytes(), clock_id_va, false),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -3616,14 +3675,17 @@ mod tests {
                     MemoryRegion::new_writable(
                         bytes_of_mut(&mut got_epochschedule_obj),
                         got_epochschedule_obj_va,
+                        false,
                     ),
                     MemoryRegion::new_writable(
                         &mut got_epochschedule_buf,
                         got_epochschedule_buf_va,
+                        false,
                     ),
                     MemoryRegion::new_readonly(
                         &EpochSchedule::id().to_bytes(),
                         epochschedule_id_va,
+                        false,
                     ),
                 ],
                 &config,
@@ -3687,6 +3749,7 @@ mod tests {
                 vec![MemoryRegion::new_writable(
                     bytes_of_mut(&mut got_fees),
                     got_fees_va,
+                    false,
                 )],
                 &config,
                 &SBPFVersion::V2,
@@ -3723,9 +3786,13 @@ mod tests {
 
             let mut memory_mapping = MemoryMapping::new(
                 vec![
-                    MemoryRegion::new_writable(bytes_of_mut(&mut got_rent_obj), got_rent_obj_va),
-                    MemoryRegion::new_writable(&mut got_rent_buf, got_rent_buf_va),
-                    MemoryRegion::new_readonly(&Rent::id().to_bytes(), rent_id_va),
+                    MemoryRegion::new_writable(
+                        bytes_of_mut(&mut got_rent_obj),
+                        got_rent_obj_va,
+                        false,
+                    ),
+                    MemoryRegion::new_writable(&mut got_rent_buf, got_rent_buf_va, false),
+                    MemoryRegion::new_readonly(&Rent::id().to_bytes(), rent_id_va, false),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -3783,9 +3850,14 @@ mod tests {
                     MemoryRegion::new_writable(
                         bytes_of_mut(&mut got_rewards_obj),
                         got_rewards_obj_va,
+                        false,
                     ),
-                    MemoryRegion::new_writable(&mut got_rewards_buf, got_rewards_buf_va),
-                    MemoryRegion::new_readonly(&EpochRewards::id().to_bytes(), rewards_id_va),
+                    MemoryRegion::new_writable(&mut got_rewards_buf, got_rewards_buf_va, false),
+                    MemoryRegion::new_readonly(
+                        &EpochRewards::id().to_bytes(),
+                        rewards_id_va,
+                        false,
+                    ),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -3848,9 +3920,14 @@ mod tests {
                     MemoryRegion::new_writable(
                         bytes_of_mut(&mut got_restart_obj),
                         got_restart_obj_va,
+                        false,
                     ),
-                    MemoryRegion::new_writable(&mut got_restart_buf, got_restart_buf_va),
-                    MemoryRegion::new_readonly(&LastRestartSlot::id().to_bytes(), restart_id_va),
+                    MemoryRegion::new_writable(&mut got_restart_buf, got_restart_buf_va, false),
+                    MemoryRegion::new_readonly(
+                        &LastRestartSlot::id().to_bytes(),
+                        restart_id_va,
+                        false,
+                    ),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -3934,8 +4011,12 @@ mod tests {
 
             let mut memory_mapping = MemoryMapping::new(
                 vec![
-                    MemoryRegion::new_writable(&mut got_history_buf, got_history_buf_va),
-                    MemoryRegion::new_readonly(&StakeHistory::id().to_bytes(), history_id_va),
+                    MemoryRegion::new_writable(&mut got_history_buf, got_history_buf_va, false),
+                    MemoryRegion::new_readonly(
+                        &StakeHistory::id().to_bytes(),
+                        history_id_va,
+                        false,
+                    ),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -3993,8 +4074,8 @@ mod tests {
 
             let mut memory_mapping = MemoryMapping::new(
                 vec![
-                    MemoryRegion::new_writable(&mut got_hashes_buf, got_hashes_buf_va),
-                    MemoryRegion::new_readonly(&SlotHashes::id().to_bytes(), hashes_id_va),
+                    MemoryRegion::new_writable(&mut got_hashes_buf, got_hashes_buf_va, false),
+                    MemoryRegion::new_readonly(&SlotHashes::id().to_bytes(), hashes_id_va, false),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -4038,9 +4119,9 @@ mod tests {
 
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&Clock::id().to_bytes(), clock_id_va),
-                MemoryRegion::new_writable(&mut got_clock_buf_rw, got_clock_buf_rw_va),
-                MemoryRegion::new_readonly(&got_clock_buf_ro, got_clock_buf_ro_va),
+                MemoryRegion::new_readonly(&Clock::id().to_bytes(), clock_id_va, false),
+                MemoryRegion::new_writable(&mut got_clock_buf_rw, got_clock_buf_rw_va, false),
+                MemoryRegion::new_readonly(&got_clock_buf_ro, got_clock_buf_ro_va, false),
             ],
             &config,
             &SBPFVersion::V2,
@@ -4213,9 +4294,9 @@ mod tests {
         let mut address = Pubkey::default();
         let mut bump_seed = 0;
         let mut regions = vec![
-            MemoryRegion::new_readonly(bytes_of(program_id), PROGRAM_ID_VA),
-            MemoryRegion::new_writable(bytes_of_mut(&mut address), ADDRESS_VA),
-            MemoryRegion::new_writable(bytes_of_mut(&mut bump_seed), BUMP_SEED_VA),
+            MemoryRegion::new_readonly(bytes_of(program_id), PROGRAM_ID_VA, false),
+            MemoryRegion::new_writable(bytes_of_mut(&mut address), ADDRESS_VA, false),
+            MemoryRegion::new_writable(bytes_of_mut(&mut bump_seed), BUMP_SEED_VA, false),
         ];
 
         let mut mock_slices = Vec::with_capacity(seeds.len());
@@ -4226,11 +4307,16 @@ mod tests {
                 len: seed.len(),
             };
             mock_slices.push(mock_slice);
-            regions.push(MemoryRegion::new_readonly(bytes_of_slice(seed), vm_addr));
+            regions.push(MemoryRegion::new_readonly(
+                bytes_of_slice(seed),
+                vm_addr,
+                false,
+            ));
         }
         regions.push(MemoryRegion::new_readonly(
             bytes_of_slice(&mock_slices),
             SEEDS_VA,
+            false,
         ));
         let mut memory_mapping = MemoryMapping::new(regions, &config, &SBPFVersion::V2).unwrap();
 
@@ -4291,9 +4377,9 @@ mod tests {
         let config = Config::default();
         let mut memory_mapping = MemoryMapping::new(
             vec![
-                MemoryRegion::new_readonly(&data, SRC_VA),
-                MemoryRegion::new_writable(&mut data_buffer, DST_VA),
-                MemoryRegion::new_writable(&mut id_buffer, PROGRAM_ID_VA),
+                MemoryRegion::new_readonly(&data, SRC_VA, false),
+                MemoryRegion::new_writable(&mut data_buffer, DST_VA, false),
+                MemoryRegion::new_writable(&mut id_buffer, PROGRAM_ID_VA, false),
             ],
             &config,
             &SBPFVersion::V2,
@@ -4394,7 +4480,11 @@ mod tests {
         let mut memory = [0u8; END_OFFSET];
         let config = Config::default();
         let mut memory_mapping = MemoryMapping::new(
-            vec![MemoryRegion::new_writable(&mut memory, VM_BASE_ADDRESS)],
+            vec![MemoryRegion::new_writable(
+                &mut memory,
+                VM_BASE_ADDRESS,
+                false,
+            )],
             &config,
             &SBPFVersion::V2,
         )
@@ -4697,9 +4787,9 @@ mod tests {
 
             let mut memory_mapping = MemoryMapping::new(
                 vec![
-                    MemoryRegion::new_readonly(bytes_of(&params_max_len), VADDR_PARAMS),
-                    MemoryRegion::new_readonly(&data, VADDR_DATA),
-                    MemoryRegion::new_writable(&mut data_out, VADDR_OUT),
+                    MemoryRegion::new_readonly(bytes_of(&params_max_len), VADDR_PARAMS, false),
+                    MemoryRegion::new_readonly(&data, VADDR_DATA, false),
+                    MemoryRegion::new_writable(&mut data_out, VADDR_OUT, false),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -4739,9 +4829,9 @@ mod tests {
 
             let mut memory_mapping = MemoryMapping::new(
                 vec![
-                    MemoryRegion::new_readonly(bytes_of(&params_inv_len), VADDR_PARAMS),
-                    MemoryRegion::new_readonly(&data, VADDR_DATA),
-                    MemoryRegion::new_writable(&mut data_out, VADDR_OUT),
+                    MemoryRegion::new_readonly(bytes_of(&params_inv_len), VADDR_PARAMS, false),
+                    MemoryRegion::new_readonly(&data, VADDR_DATA, false),
+                    MemoryRegion::new_writable(&mut data_out, VADDR_OUT, false),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -4860,7 +4950,7 @@ mod tests {
             let mut memory_mapping = MemoryMapping::new(
                 vec![
                     // Invalid read-only memory region.
-                    MemoryRegion::new_readonly(&[2; 31], vote_address_var),
+                    MemoryRegion::new_readonly(&[2; 31], vote_address_var, false),
                 ],
                 &config,
                 &SBPFVersion::V2,
@@ -4891,6 +4981,7 @@ mod tests {
                 vec![MemoryRegion::new_readonly(
                     bytes_of(&vote_address),
                     vote_address_var,
+                    false,
                 )],
                 &config,
                 &SBPFVersion::V2,
@@ -4923,6 +5014,7 @@ mod tests {
                 vec![MemoryRegion::new_readonly(
                     bytes_of(&not_a_vote_address),
                     vote_address_var,
+                    false,
                 )],
                 &config,
                 &SBPFVersion::V2,

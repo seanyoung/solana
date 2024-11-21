@@ -100,7 +100,7 @@ impl Serializer {
             self.write_all(account.get_data());
             vm_data_addr
         } else {
-            self.push_region(true);
+            self.push_region(true, false);
             let vaddr = self.vaddr;
             self.push_account_data_region(account)?;
             vaddr
@@ -122,7 +122,7 @@ impl Serializer {
                     .map_err(|_| InstructionError::InvalidArgument)?;
                 self.region_start += BPF_ALIGN_OF_U128.saturating_sub(align_offset);
                 // put the realloc padding in its own region
-                self.push_region(account.can_data_be_changed().is_ok());
+                self.push_region(account.can_data_be_changed().is_ok(), true);
             }
         }
 
@@ -135,13 +135,18 @@ impl Serializer {
     ) -> Result<(), InstructionError> {
         if !account.get_data().is_empty() {
             let region = match account_data_region_memory_state(account) {
-                MemoryState::Readable => MemoryRegion::new_readonly(account.get_data(), self.vaddr),
+                MemoryState::Readable => {
+                    MemoryRegion::new_readonly(account.get_data(), self.vaddr, true)
+                }
                 MemoryState::Writable => {
-                    MemoryRegion::new_writable(account.get_data_mut()?, self.vaddr)
+                    MemoryRegion::new_writable(account.get_data_mut()?, self.vaddr, true)
                 }
-                MemoryState::Cow(index_in_transaction) => {
-                    MemoryRegion::new_cow(account.get_data(), self.vaddr, index_in_transaction)
-                }
+                MemoryState::Cow(index_in_transaction) => MemoryRegion::new_cow(
+                    account.get_data(),
+                    self.vaddr,
+                    index_in_transaction,
+                    true,
+                ),
             };
             self.vaddr += region.len;
             self.regions.push(region);
@@ -150,26 +155,29 @@ impl Serializer {
         Ok(())
     }
 
-    fn push_region(&mut self, writable: bool) {
+    fn push_region(&mut self, writable: bool, is_account: bool) {
         let range = self.region_start..self.buffer.len();
         let region = if writable {
             MemoryRegion::new_writable(
                 self.buffer.as_slice_mut().get_mut(range.clone()).unwrap(),
                 self.vaddr,
+                is_account,
             )
         } else {
             MemoryRegion::new_readonly(
                 self.buffer.as_slice().get(range.clone()).unwrap(),
                 self.vaddr,
+                false,
             )
         };
+
         self.regions.push(region);
         self.region_start = range.end;
         self.vaddr += range.len() as u64;
     }
 
     fn finish(mut self) -> (AlignedMemory<HOST_ALIGN>, Vec<MemoryRegion>) {
-        self.push_region(true);
+        self.push_region(true, false);
         debug_assert_eq!(self.region_start, self.buffer.len());
         (self.buffer, self.regions)
     }

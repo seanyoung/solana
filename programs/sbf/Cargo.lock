@@ -5133,7 +5133,7 @@ dependencies = [
  "solana-sdk",
  "solana-timings",
  "solana-type-overrides",
- "solana_rbpf",
+ "solana_rbpf 0.8.5",
  "thiserror 2.0.3",
 ]
 
@@ -5901,7 +5901,7 @@ dependencies = [
  "solana-program-runtime",
  "solana-sdk",
  "solana-type-overrides",
- "solana_rbpf",
+ "solana_rbpf 0.8.5",
 ]
 
 [[package]]
@@ -6221,7 +6221,7 @@ dependencies = [
  "solana-sdk",
  "solana-timings",
  "solana-type-overrides",
- "solana_rbpf",
+ "solana_rbpf 0.8.5",
  "thiserror 2.0.3",
 ]
 
@@ -6254,7 +6254,7 @@ dependencies = [
  "solana-svm",
  "solana-timings",
  "solana-vote-program",
- "solana_rbpf",
+ "solana_rbpf 0.8.5",
  "thiserror 2.0.3",
  "tokio",
 ]
@@ -6659,7 +6659,7 @@ dependencies = [
  "solana-type-overrides",
  "solana-vote",
  "solana-vote-program",
- "solana_rbpf",
+ "solana_rbpf 0.8.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6672,6 +6672,13 @@ dependencies = [
 
 [[package]]
 name = "solana-sbf-rust-128bit-dep"
+version = "2.2.0"
+dependencies = [
+ "solana-program",
+]
+
+[[package]]
+name = "solana-sbf-rust-account-mem"
 version = "2.2.0"
 dependencies = [
  "solana-program",
@@ -7980,6 +7987,22 @@ dependencies = [
  "subtle",
  "thiserror 2.0.3",
  "zeroize",
+]
+
+[[package]]
+name = "solana_rbpf"
+version = "0.8.5"
+dependencies = [
+ "byteorder 1.5.0",
+ "combine 3.8.1",
+ "hash32",
+ "libc",
+ "log",
+ "rand 0.8.5",
+ "rustc-demangle",
+ "scroll",
+ "thiserror 1.0.69",
+ "winapi 0.3.9",
 ]
 
 [[package]]
