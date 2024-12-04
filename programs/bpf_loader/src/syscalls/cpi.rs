@@ -91,7 +91,7 @@ struct CallerAccount<'a, 'b> {
     // BpfExecutor::execute).
     //
     // This is only set when direct mapping is off (see the relevant comment in
-    // CallerAccount::from_account_info).
+    // CallerAccount::3_info).
     serialized_data: &'a mut [u8],
     // Given the corresponding input AccountInfo::data, vm_data_addr points to
     // the pointer field and ref_to_len_in_vm points to the length field.
@@ -493,7 +493,7 @@ impl SyscallInvokeSigned for SyscallInvokeSignedRust {
             instruction_accounts,
             program_indices,
             &account_info_keys,
-            account_infos,
+            &account_infos,
             account_infos_addr,
             is_loader_deprecated,
             invoke_context,
@@ -541,7 +541,11 @@ impl SyscallInvokeSigned for SyscallInvokeSignedRust {
                         )
                     })
                     .collect::<Result<Vec<_>, Error>>()?;
-                let signer = Pubkey::create_program_address(&seeds, program_id)
+                let mut arg: Vec<&[u8]> = Vec::with_capacity(seeds.len());
+
+                seeds.iter().for_each(|e| arg.push(e));
+
+                let signer = Pubkey::create_program_address(&arg, program_id)
                     .map_err(SyscallError::BadSeeds)?;
                 signers.push(signer);
             }
@@ -564,7 +568,7 @@ struct SolInstruction {
 }
 
 /// Rust representation of C's SolAccountMeta
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct SolAccountMeta {
     pubkey_addr: u64,
@@ -573,7 +577,7 @@ struct SolAccountMeta {
 }
 
 /// Rust representation of C's SolAccountInfo
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct SolAccountInfo {
     key_addr: u64,
@@ -588,7 +592,7 @@ struct SolAccountInfo {
 }
 
 /// Rust representation of C's SolSignerSeed
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct SolSignerSeedC {
     addr: u64,
@@ -596,7 +600,7 @@ struct SolSignerSeedC {
 }
 
 /// Rust representation of C's SolSignerSeeds
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct SolSignerSeedsC {
     addr: u64,
@@ -729,7 +733,7 @@ impl SyscallInvokeSigned for SyscallInvokeSignedC {
             instruction_accounts,
             program_indices,
             &account_info_keys,
-            account_infos,
+            &account_infos,
             account_infos_addr,
             is_loader_deprecated,
             invoke_context,
@@ -778,7 +782,11 @@ impl SyscallInvokeSigned for SyscallInvokeSignedC {
                             )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
-                    Pubkey::create_program_address(&seeds_bytes, program_id)
+                    let mut arg: Vec<&[u8]> = Vec::with_capacity(seeds_bytes.len());
+
+                    seeds_bytes.iter().for_each(|e| arg.push(e));
+
+                    Pubkey::create_program_address(&arg, program_id)
                         .map_err(|err| Box::new(SyscallError::BadSeeds(err)) as Error)
                 })
                 .collect::<Result<Vec<_>, Error>>()?)
@@ -794,9 +802,10 @@ fn translate_account_infos<'a, T, F>(
     key_addr: F,
     memory_mapping: &MemoryMapping,
     invoke_context: &mut InvokeContext,
-) -> Result<(&'a [T], Vec<&'a Pubkey>), Error>
+) -> Result<(Cow<'a, [T]>, Vec<&'a Pubkey>), Error>
 where
     F: Fn(&T) -> u64,
+    [T]: ToOwned,
 {
     let direct_mapping = invoke_context
         .get_feature_set()
@@ -1230,7 +1239,7 @@ fn update_callee_account(
                         .get_data_mut()?
                         .get_mut(caller_account.original_data_len..post_len)
                         .ok_or(SyscallError::InvalidLength)?
-                        .copy_from_slice(serialized_data);
+                        .copy_from_slice(&serialized_data);
                 }
             }
             Err(err) if prev_len != post_len => {

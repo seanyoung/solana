@@ -141,8 +141,9 @@ declare_builtin_function!(
         )?;
 
         let mut fields = Vec::with_capacity(untranslated_fields.len());
+        let mut arg: Vec<&[u8]> = Vec::with_capacity(untranslated_fields.len());
 
-        for untranslated_field in untranslated_fields {
+        for untranslated_field in &*untranslated_fields {
             fields.push(translate_slice::<u8>(
                 memory_mapping,
                 untranslated_field.as_ptr() as *const _ as u64,
@@ -151,9 +152,11 @@ declare_builtin_function!(
             )?);
         }
 
+        fields.iter().for_each(|e| arg.push(e));
+
         let log_collector = invoke_context.get_log_collector();
 
-        stable_log::program_data(&log_collector, &fields);
+        stable_log::program_data(&log_collector, &arg);
 
         Ok(0)
     }

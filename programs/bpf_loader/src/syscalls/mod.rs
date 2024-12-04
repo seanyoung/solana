@@ -12,6 +12,7 @@ pub use self::{
 };
 #[allow(deprecated)]
 use {
+    mem_ops::MemoryChunkIterator,
     solana_bn254::prelude::{
         alt_bn128_addition, alt_bn128_multiplication, alt_bn128_pairing, AltBn128Error,
         ALT_BN128_ADDITION_OUTPUT_LEN, ALT_BN128_MULTIPLICATION_OUTPUT_LEN,
@@ -59,8 +60,9 @@ use {
     solana_type_overrides::sync::Arc,
     std::{
         alloc::Layout,
+        borrow::Cow,
         mem::{align_of, size_of},
-        slice::from_raw_parts_mut,
+        slice::{from_raw_parts, from_raw_parts_mut},
         str::{from_utf8, Utf8Error},
     },
     thiserror::Error as ThisError,
@@ -602,7 +604,7 @@ fn translate_slice_mut<'a, T>(
         check_aligned,
     )
 }
-fn translate_slice<'a, T>(
+fn translate_slice_old<'a, T>(
     memory_mapping: &MemoryMapping,
     vm_addr: u64,
     len: u64,
@@ -618,6 +620,79 @@ fn translate_slice<'a, T>(
     .map(|value| &*value)
 }
 
+fn translate_slice<'a, T>(
+    memory_mapping: &MemoryMapping,
+    vm_addr: u64,
+    len: u64,
+    check_aligned: bool,
+) -> Result<Cow<'a, [T]>, Error>
+where
+    [T]: ToOwned,
+{
+    let total_size = len.saturating_mul(size_of::<T>() as u64);
+
+    let mut chunk_iter =
+        MemoryChunkIterator::new(memory_mapping, AccessType::Load, vm_addr, total_size)?;
+
+    let owned = if let Some(first) = chunk_iter.next() {
+        let first = {
+            let (region, vm_addr, len) = first?;
+
+            let host_addr = Result::from(region.vm_to_host(vm_addr, len as u64))?;
+
+            if check_aligned && !address_is_aligned::<T>(host_addr) {
+                return Err(SyscallError::UnalignedPointer.into());
+            }
+
+            unsafe { from_raw_parts(host_addr as *const u8, len) }
+        };
+
+        let mut owned = None;
+
+        for next in chunk_iter {
+            if owned.is_none() {
+                let mut start = Vec::with_capacity(len as usize);
+                first.clone_into(&mut start);
+                owned = Some(start);
+            }
+
+            let (region, vm_addr, len) = next?;
+
+            let host_addr = Result::from(region.vm_to_host(vm_addr, len as u64))?;
+
+            let slice = unsafe { from_raw_parts(host_addr as *const u8, len) };
+
+            if let Some(owned) = &mut owned {
+                owned.extend_from_slice(slice);
+            }
+        }
+
+        if let Some(owned) = owned {
+            Cow::Owned(owned.to_owned())
+        } else {
+            Cow::Borrowed(first)
+        }
+    } else {
+        let empty: &[u8] = &[];
+        Cow::Borrowed(empty)
+    };
+
+    match owned {
+        Cow::Borrowed(slice) => Ok(Cow::Borrowed(unsafe {
+            from_raw_parts(slice.as_ptr() as *const T, len as usize)
+        })),
+        Cow::Owned(owned) => {
+            let copy: Vec<T> = unsafe {
+                Vec::from_raw_parts(owned.as_ptr() as *mut T, len as usize, len as usize)
+            };
+            // Now owned by copy
+            owned.leak();
+
+            Ok(Cow::Owned(copy.to_owned()))
+        }
+    }
+}
+
 /// Take a virtual pointer to a string (points to SBF VM memory space), translate it
 /// pass it to a user-defined work function
 fn translate_string_and_do(
@@ -627,8 +702,8 @@ fn translate_string_and_do(
     check_aligned: bool,
     work: &mut dyn FnMut(&str) -> Result<u64, Error>,
 ) -> Result<u64, Error> {
-    let buf = translate_slice::<u8>(memory_mapping, addr, len, check_aligned)?;
-    match from_utf8(buf) {
+    let buf = translate_slice(memory_mapping, addr, len, check_aligned)?;
+    match from_utf8(&buf) {
         Ok(message) => work(message),
         Err(err) => Err(SyscallError::InvalidString(err, buf.to_vec()).into()),
     }
@@ -722,7 +797,7 @@ fn translate_and_check_program_address_inputs<'a>(
     program_id_addr: u64,
     memory_mapping: &mut MemoryMapping,
     check_aligned: bool,
-) -> Result<(Vec<&'a [u8]>, &'a Pubkey), Error> {
+) -> Result<(Vec<Vec<u8>>, &'a Pubkey), Error> {
     let untranslated_seeds =
         translate_slice::<&[u8]>(memory_mapping, seeds_addr, seeds_len, check_aligned)?;
     if untranslated_seeds.len() > MAX_SEEDS {
@@ -740,8 +815,9 @@ fn translate_and_check_program_address_inputs<'a>(
                 untranslated_seed.len() as u64,
                 check_aligned,
             )
+            .map(|e: Cow<[u8]>| e.to_vec())
         })
-        .collect::<Result<Vec<_>, Error>>()?;
+        .collect::<Result<Vec<Vec<u8>>, Error>>()?;
     let program_id = translate_type::<Pubkey>(memory_mapping, program_id_addr, check_aligned)?;
     Ok((seeds, program_id))
 }
@@ -771,7 +847,11 @@ declare_builtin_function!(
             invoke_context.get_check_aligned(),
         )?;
 
-        let Ok(new_address) = Pubkey::create_program_address(&seeds, program_id) else {
+        let mut arg: Vec<&[u8]> = Vec::with_capacity(seeds.len());
+
+        seeds.iter().for_each(|e| arg.push(e));
+
+        let Ok(new_address) = Pubkey::create_program_address(&arg, program_id) else {
             return Ok(1);
         };
         let address = translate_slice_mut::<u8>(
@@ -802,13 +882,17 @@ declare_builtin_function!(
             .create_program_address_units;
         consume_compute_meter(invoke_context, cost)?;
 
-        let (seeds, program_id) = translate_and_check_program_address_inputs(
+        let (seeds_vec, program_id) = translate_and_check_program_address_inputs(
             seeds_addr,
             seeds_len,
             program_id_addr,
             memory_mapping,
             invoke_context.get_check_aligned(),
         )?;
+
+        let mut seeds: Vec<&[u8]> = Vec::with_capacity(seeds_vec.len());
+
+        seeds_vec.iter().for_each(|e| seeds.push(e));
 
         let mut bump_seed = [u8::MAX];
         for _ in 0..u8::MAX {
@@ -884,7 +968,7 @@ declare_builtin_function!(
             invoke_context.get_check_aligned(),
         )?;
 
-        let Ok(message) = libsecp256k1::Message::parse_slice(hash) else {
+        let Ok(message) = libsecp256k1::Message::parse_slice(&hash) else {
             return Ok(Secp256k1RecoverError::InvalidHash.into());
         };
         let Ok(adjusted_recover_id_val) = recovery_id_val.try_into() else {
@@ -893,7 +977,7 @@ declare_builtin_function!(
         let Ok(recovery_id) = libsecp256k1::RecoveryId::parse(adjusted_recover_id_val) else {
             return Ok(Secp256k1RecoverError::InvalidRecoveryId.into());
         };
-        let Ok(signature) = libsecp256k1::Signature::parse_standard_slice(signature) else {
+        let Ok(signature) = libsecp256k1::Signature::parse_standard_slice(&signature) else {
             return Ok(Secp256k1RecoverError::InvalidSignature.into());
         };
 
@@ -1248,7 +1332,8 @@ declare_builtin_function!(
                     invoke_context.get_check_aligned(),
                 )?;
 
-                if let Some(result_point) = edwards::multiscalar_multiply_edwards(scalars, points) {
+                if let Some(result_point) = edwards::multiscalar_multiply_edwards(&scalars, &points)
+                {
                     *translate_type_mut::<edwards::PodEdwardsPoint>(
                         memory_mapping,
                         result_point_addr,
@@ -1287,7 +1372,7 @@ declare_builtin_function!(
                 )?;
 
                 if let Some(result_point) =
-                    ristretto::multiscalar_multiply_ristretto(scalars, points)
+                    ristretto::multiscalar_multiply_ristretto(&scalars, &points)
                 {
                     *translate_type_mut::<ristretto::PodRistrettoPoint>(
                         memory_mapping,
@@ -1657,7 +1742,7 @@ declare_builtin_function!(
             .get_feature_set()
             .is_active(&feature_set::simplify_alt_bn128_syscall_error_codes::id());
 
-        let result_point = match calculation(input) {
+        let result_point = match calculation(&input) {
             Ok(result_point) => result_point,
             Err(e) => {
                 return if simplify_alt_bn128_syscall_error_codes {
@@ -1691,12 +1776,13 @@ declare_builtin_function!(
         _arg5: u64,
         memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Error> {
-        let params = &translate_slice::<BigModExpParams>(
+        let params = translate_slice::<BigModExpParams>(
             memory_mapping,
             params,
             1,
             invoke_context.get_check_aligned(),
-        )?
+        )?;
+        let params = params
         .first()
         .ok_or(SyscallError::InvalidLength)?;
 
@@ -1741,7 +1827,7 @@ declare_builtin_function!(
             invoke_context.get_check_aligned(),
         )?;
 
-        let value = big_mod_exp(base, exponent, modulus);
+        let value = big_mod_exp(&base, &exponent, &modulus);
 
         let return_value = translate_slice_mut::<u8>(
             memory_mapping,
@@ -1813,11 +1899,15 @@ declare_builtin_function!(
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
+        let mut arg: Vec<&[u8]> = Vec::with_capacity(inputs.len());
+
+        inputs.iter().for_each(|e| arg.push(e));
+
         let simplify_alt_bn128_syscall_error_codes = invoke_context
             .get_feature_set()
             .is_active(&feature_set::simplify_alt_bn128_syscall_error_codes::id());
 
-        let hash = match poseidon::hashv(parameters, endianness, inputs.as_slice()) {
+        let hash = match poseidon::hashv(parameters, endianness, &arg) {
             Ok(hash) => hash,
             Err(e) => {
                 return if simplify_alt_bn128_syscall_error_codes {
@@ -1914,7 +2004,7 @@ declare_builtin_function!(
 
         match op {
             ALT_BN128_G1_COMPRESS => {
-                let result_point = match alt_bn128_g1_compress(input) {
+                let result_point = match alt_bn128_g1_compress(&input) {
                     Ok(result_point) => result_point,
                     Err(e) => {
                         return if simplify_alt_bn128_syscall_error_codes {
@@ -1928,7 +2018,7 @@ declare_builtin_function!(
                 Ok(SUCCESS)
             }
             ALT_BN128_G1_DECOMPRESS => {
-                let result_point = match alt_bn128_g1_decompress(input) {
+                let result_point = match alt_bn128_g1_decompress(&input) {
                     Ok(result_point) => result_point,
                     Err(e) => {
                         return if simplify_alt_bn128_syscall_error_codes {
@@ -1942,7 +2032,7 @@ declare_builtin_function!(
                 Ok(SUCCESS)
             }
             ALT_BN128_G2_COMPRESS => {
-                let result_point = match alt_bn128_g2_compress(input) {
+                let result_point = match alt_bn128_g2_compress(&input) {
                     Ok(result_point) => result_point,
                     Err(e) => {
                         return if simplify_alt_bn128_syscall_error_codes {
@@ -1956,7 +2046,7 @@ declare_builtin_function!(
                 Ok(SUCCESS)
             }
             ALT_BN128_G2_DECOMPRESS => {
-                let result_point = match alt_bn128_g2_decompress(input) {
+                let result_point = match alt_bn128_g2_decompress(&input) {
                     Ok(result_point) => result_point,
                     Err(e) => {
                         return if simplify_alt_bn128_syscall_error_codes {
@@ -2032,7 +2122,7 @@ declare_builtin_function!(
                     ),
                 );
                 consume_compute_meter(invoke_context, cost)?;
-                hasher.hash(bytes);
+                hasher.hash(&bytes);
             }
         }
         hash_result.copy_from_slice(hasher.result().as_ref());

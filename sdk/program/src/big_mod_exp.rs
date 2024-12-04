@@ -1,3 +1,4 @@
+#[derive(Clone)]
 #[repr(C)]
 pub struct BigModExpParams {
     pub base: *const u8,

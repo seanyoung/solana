@@ -103,7 +103,7 @@ declare_builtin_function!(
             // memcmp is marked unsafe since it assumes that the inputs are at least
             // `n` bytes long. `s1` and `s2` are guaranteed to be exactly `n` bytes
             // long because `translate_slice` would have failed otherwise.
-            *cmp_result = unsafe { memcmp(s1, s2, n as usize) };
+            *cmp_result = unsafe { memcmp(&s1, &s2, n as usize) };
         }
 
         Ok(0)
@@ -390,7 +390,7 @@ where
     Ok(T::default())
 }
 
-struct MemoryChunkIterator<'a> {
+pub(crate) struct MemoryChunkIterator<'a> {
     memory_mapping: &'a MemoryMapping<'a>,
     access_type: AccessType,
     initial_vm_addr: u64,
@@ -401,7 +401,7 @@ struct MemoryChunkIterator<'a> {
 }
 
 impl<'a> MemoryChunkIterator<'a> {
-    fn new(
+    pub(crate) fn new(
         memory_mapping: &'a MemoryMapping,
         access_type: AccessType,
         vm_addr: u64,
