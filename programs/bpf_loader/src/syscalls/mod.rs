@@ -27,8 +27,8 @@ use {
         enable_alt_bn128_compression_syscall, enable_alt_bn128_syscall, enable_big_mod_exp_syscall,
         enable_get_epoch_stake_syscall, enable_partitioned_epoch_reward, enable_poseidon_syscall,
         get_sysvar_syscall_enabled, last_restart_slot_sysvar,
-        partitioned_epoch_rewards_superfeature,
-        remaining_compute_units_syscall_enabled, FeatureSet,
+        partitioned_epoch_rewards_superfeature, remaining_compute_units_syscall_enabled,
+        FeatureSet,
     },
     solana_log_collector::{ic_logger_msg, ic_msg},
     solana_poseidon as poseidon,
@@ -581,6 +581,7 @@ fn translate_slice_inner<'a, T>(
     if check_aligned && !address_is_aligned::<T>(host_addr) {
         return Err(SyscallError::UnalignedPointer.into());
     }
+    println!("XXX slice_inner: host_addr:{host_addr:#} len:{len}");
     Ok(unsafe { from_raw_parts_mut(host_addr as *mut T, len as usize) })
 }
 fn translate_slice_mut<'a, T>(
@@ -2006,6 +2007,8 @@ declare_builtin_function!(
         )?;
         let mut hasher = H::create_hasher();
         if vals_len > 0 {
+            println!("XXX HASH slice addr:{vals_addr:#x} len:{vals_len}");
+
             let vals = translate_slice::<&[u8]>(
                 memory_mapping,
                 vals_addr,

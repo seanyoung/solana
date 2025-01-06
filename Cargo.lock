@@ -9048,7 +9048,7 @@ dependencies = [
 [[package]]
 name = "solana_rbpf"
 version = "0.8.2"
-source = "git+https://github.com/solana-labs/rbpf?rev=410a627#410a627313124252ab1abbd3a3b686c03301bb2a"
+source = "git+https://github.com/seanyoung/rbpf?branch=fuzzing-plain#9f9a7503eaba13ba35f0ddc9de444c85ce82bd06"
 dependencies = [
  "byteorder",
  "combine 3.8.1",
