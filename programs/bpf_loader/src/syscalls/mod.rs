@@ -623,10 +623,17 @@ fn translate_string_and_do(
     check_aligned: bool,
     work: &mut dyn FnMut(&str) -> Result<u64, Error>,
 ) -> Result<u64, Error> {
+    println!("XXX translate_string_and_do addr:{addr:#x} len:{len}");
     let buf = translate_slice::<u8>(memory_mapping, addr, len, check_aligned)?;
     match from_utf8(buf) {
-        Ok(message) => work(message),
-        Err(err) => Err(SyscallError::InvalidString(err, buf.to_vec()).into()),
+        Ok(message) => {
+            println!("XXX translate_string_and_do {message}",);
+            work(message)
+        }
+        Err(err) => {
+            println!("XXX translate_string_and_do err:{err}",);
+            Err(SyscallError::InvalidString(err, buf.to_vec()).into())
+        }
     }
 }
 
