@@ -27,6 +27,8 @@ declare_builtin_function!(
     ) -> Result<u64, Error> {
         mem_op_consume(invoke_context, n)?;
 
+        println!("XXX memcpy dst:{dst_addr:#x} src:{src_addr:#E} len:{n}");
+
         if !is_nonoverlapping(src_addr, n, dst_addr, n) {
             return Err(SyscallError::CopyOverlapping.into());
         }
@@ -50,6 +52,8 @@ declare_builtin_function!(
     ) -> Result<u64, Error> {
         mem_op_consume(invoke_context, n)?;
 
+        println!("XXX memmove dst:{dst_addr:#x} src:{src_addr:#x} len:{n}");
+
         memmove(invoke_context, dst_addr, src_addr, n, memory_mapping)
     }
 );
@@ -67,6 +71,8 @@ declare_builtin_function!(
         memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Error> {
         mem_op_consume(invoke_context, n)?;
+
+        println!("XXX memcmp s1:{s1_addr:#x} s2:{s2_addr:#x} len:{n}");
 
         if invoke_context
             .get_feature_set()
@@ -123,6 +129,8 @@ declare_builtin_function!(
         memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Error> {
         mem_op_consume(invoke_context, n)?;
+
+        println!("XXX memset dst:{dst_addr:#x} c:{c:#x} len:{n}");
 
         if invoke_context
             .get_feature_set()
