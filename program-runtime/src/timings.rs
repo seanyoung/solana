@@ -8,7 +8,7 @@ use {
     },
 };
 
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct ProgramTiming {
     pub accumulated_us: u64,
     pub accumulated_units: u64,
@@ -40,7 +40,7 @@ impl ProgramTiming {
 }
 
 /// Used as an index for `Metrics`.
-#[derive(Debug, Sequence)]
+#[derive(Debug, Sequence, Clone)]
 pub enum ExecuteTimingType {
     CheckUs,
     ValidateFeesUs,
@@ -55,6 +55,7 @@ pub enum ExecuteTimingType {
     ProgramCacheUs,
 }
 
+#[derive(Clone)]
 pub struct Metrics([u64; ExecuteTimingType::CARDINALITY]);
 
 impl Index<ExecuteTimingType> for Metrics {
@@ -292,7 +293,7 @@ eager_macro_rules! { $eager_1
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecuteTimings {
     pub metrics: Metrics,
     pub details: ExecuteDetailsTimings,
@@ -318,7 +319,7 @@ impl ExecuteTimings {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct ExecuteProcessInstructionTimings {
     pub total_us: u64,
     pub verify_caller_us: u64,
@@ -338,7 +339,7 @@ impl ExecuteProcessInstructionTimings {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct ExecuteAccessoryTimings {
     pub feature_set_clone_us: u64,
     pub get_executors_us: u64,
@@ -358,7 +359,7 @@ impl ExecuteAccessoryTimings {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct ExecuteDetailsTimings {
     pub serialize_us: u64,
     pub create_vm_us: u64,

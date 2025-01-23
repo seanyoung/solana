@@ -207,6 +207,7 @@ pub struct InvokeContext<'a> {
     pub timings: ExecuteDetailsTimings,
     pub syscall_context: Vec<Option<SyscallContext>>,
     traces: Vec<Vec<[u64; 12]>>,
+    pub direct_mapping: bool,
 }
 
 impl<'a> InvokeContext<'a> {
@@ -229,6 +230,7 @@ impl<'a> InvokeContext<'a> {
             timings: ExecuteDetailsTimings::default(),
             syscall_context: Vec::new(),
             traces: Vec::new(),
+            direct_mapping: false,
         }
     }
 

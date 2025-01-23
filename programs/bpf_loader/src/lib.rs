@@ -35,9 +35,7 @@ use {
         bpf_loader_upgradeable::{self, UpgradeableLoaderState},
         clock::Slot,
         entrypoint::{MAX_PERMITTED_DATA_INCREASE, SUCCESS},
-        feature_set::{
-            enable_bpf_loader_set_authority_checked_ix, FeatureSet,
-        },
+        feature_set::{enable_bpf_loader_set_authority_checked_ix, FeatureSet},
         instruction::{AccountMeta, InstructionError},
         loader_upgradeable_instruction::UpgradeableLoaderInstruction,
         loader_v4, native_loader,
@@ -1360,11 +1358,7 @@ fn execute<'a, 'b: 'a>(
     #[cfg(all(not(target_os = "windows"), target_arch = "x86_64"))]
     let use_jit = executable.get_compiled_program().is_some();
 
-    let direct_mapping = invoke_context
-        .transaction_context
-        .get_current_instruction_context()
-        .unwrap()
-        .direct_mapping_enabled(invoke_context.transaction_context);
+    let direct_mapping = invoke_context.direct_mapping;
 
     let mut serialize_time = Measure::start("serialize");
     let (parameter_bytes, regions, accounts_metadata) = serialization::serialize_parameters(

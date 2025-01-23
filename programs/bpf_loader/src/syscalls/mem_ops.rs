@@ -68,11 +68,7 @@ declare_builtin_function!(
     ) -> Result<u64, Error> {
         mem_op_consume(invoke_context, n)?;
 
-        if invoke_context
-            .transaction_context
-            .get_current_instruction_context()
-            .unwrap()
-            .direct_mapping_enabled(invoke_context.transaction_context)
+        if invoke_context.direct_mapping
         {
             let cmp_result = translate_type_mut::<i32>(
                 memory_mapping,
@@ -126,11 +122,7 @@ declare_builtin_function!(
     ) -> Result<u64, Error> {
         mem_op_consume(invoke_context, n)?;
 
-        if invoke_context
-            .transaction_context
-            .get_current_instruction_context()
-            .unwrap()
-            .direct_mapping_enabled(invoke_context.transaction_context)
+        if invoke_context.direct_mapping
         {
             memset_non_contiguous(dst_addr, c as u8, n, memory_mapping)
         } else {
@@ -153,12 +145,7 @@ fn memmove(
     n: u64,
     memory_mapping: &MemoryMapping,
 ) -> Result<u64, Error> {
-    if invoke_context
-        .transaction_context
-        .get_current_instruction_context()
-        .unwrap()
-        .direct_mapping_enabled(invoke_context.transaction_context)
-    {
+    if invoke_context.direct_mapping {
         memmove_non_contiguous(dst_addr, src_addr, n, memory_mapping)
     } else {
         let dst_ptr = translate_slice_mut::<u8>(

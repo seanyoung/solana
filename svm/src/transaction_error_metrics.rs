@@ -1,6 +1,6 @@
 use solana_sdk::{clock::Slot, saturating_add_assign};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TransactionErrorMetrics {
     pub total: usize,
     pub account_in_use: usize,

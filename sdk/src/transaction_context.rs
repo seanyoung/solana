@@ -58,8 +58,8 @@ pub type TransactionAccount = (Pubkey, AccountSharedData);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransactionAccounts {
-    accounts: Vec<RefCell<AccountSharedData>>,
-    touched_flags: RefCell<Box<[bool]>>,
+    pub accounts: Vec<RefCell<AccountSharedData>>,
+    pub touched_flags: RefCell<Box<[bool]>>,
 }
 
 impl TransactionAccounts {
@@ -135,7 +135,7 @@ impl TransactionAccounts {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransactionContext {
     account_keys: Pin<Box<[Pubkey]>>,
-    accounts: Rc<TransactionAccounts>,
+    pub accounts: Rc<TransactionAccounts>,
     instruction_stack_capacity: usize,
     instruction_trace_capacity: usize,
     instruction_stack: Vec<usize>,
@@ -485,8 +485,8 @@ solana_sdk::pubkeys!(
         "CcrAd4QH71GHcC5wBRkSsMUBjrMbqaGXULm5azpRMycb",
         // Program 3Qvevpr9VQp7ECWjAU186oiSGjMhDucjU32oSX8BfxGK failed: instruction modified data of a read-only account
         "3Qvevpr9VQp7ECWjAU186oiSGjMhDucjU32oSX8BfxGK",
-         // Program HvwYjjzPbXWpykgVZhqvvfeeaSraQVnTiQibofaFw9M7 failed: instruction modified data of an account it does not own
-         "HvwYjjzPbXWpykgVZhqvvfeeaSraQVnTiQibofaFw9M7",
+        // Program HvwYjjzPbXWpykgVZhqvvfeeaSraQVnTiQibofaFw9M7 failed: instruction modified data of an account it does not own
+        "HvwYjjzPbXWpykgVZhqvvfeeaSraQVnTiQibofaFw9M7",
         // Program Bt2WPMmbwHPk36i4CRucNDyLcmoGdC7xEdrVuxgJaNE6 failed: instruction modified data of a read-only account
         "Bt2WPMmbwHPk36i4CRucNDyLcmoGdC7xEdrVuxgJaNE6",
         // Program Gd9yhiRgrggdz2bJfntC2H1sRwzuzDssdhEmUFrC1STF failed: instruction modified data of a read-only account

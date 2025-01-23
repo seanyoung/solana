@@ -108,11 +108,7 @@ impl<'a, 'b> CallerAccount<'a, 'b> {
         account_info: &AccountInfo,
         account_metadata: &SerializedAccountMetadata,
     ) -> Result<CallerAccount<'a, 'b>, Error> {
-        let direct_mapping = invoke_context
-            .transaction_context
-            .get_current_instruction_context()
-            .unwrap()
-            .direct_mapping_enabled(invoke_context.transaction_context);
+        let direct_mapping = invoke_context.direct_mapping;
 
         if direct_mapping {
             check_account_info_pointer(
@@ -247,11 +243,7 @@ impl<'a, 'b> CallerAccount<'a, 'b> {
         account_info: &SolAccountInfo,
         account_metadata: &SerializedAccountMetadata,
     ) -> Result<CallerAccount<'a, 'b>, Error> {
-        let direct_mapping = invoke_context
-            .transaction_context
-            .get_current_instruction_context()
-            .unwrap()
-            .direct_mapping_enabled(invoke_context.transaction_context);
+        let direct_mapping = invoke_context.direct_mapping;
 
         if direct_mapping {
             check_account_info_pointer(
@@ -867,11 +859,7 @@ where
         .unwrap()
         .accounts_metadata;
 
-    let direct_mapping = invoke_context
-        .transaction_context
-        .get_current_instruction_context()
-        .unwrap()
-        .direct_mapping_enabled(invoke_context.transaction_context);
+    let direct_mapping = invoke_context.direct_mapping;
 
     for (instruction_account_index, instruction_account) in instruction_accounts.iter().enumerate()
     {
@@ -1129,11 +1117,7 @@ fn cpi_common<S: SyscallInvokeSigned>(
     // CPI exit.
     //
     // Synchronize the callee's account changes so the caller can see them.
-    let direct_mapping = invoke_context
-        .transaction_context
-        .get_current_instruction_context()
-        .unwrap()
-        .direct_mapping_enabled(invoke_context.transaction_context);
+    let direct_mapping = invoke_context.direct_mapping;
 
     if direct_mapping {
         // Update all perms at once before doing account data updates. This

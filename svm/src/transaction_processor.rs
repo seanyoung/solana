@@ -1,5 +1,7 @@
 #[cfg(feature = "dev-context-only-utils")]
 use qualifier_attr::qualifiers;
+use solana_program_runtime::log_collector;
+use solana_sdk::transaction_context::IndexOfAccount;
 use {
     crate::{
         account_loader::{
@@ -713,6 +715,99 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
     ) -> TransactionExecutionResult {
         let transaction_accounts = std::mem::take(&mut loaded_transaction.accounts);
 
+        let twice = transaction_accounts
+            .iter()
+            .any(|(key, _)| solana_sdk::transaction_context::broken_direct_mapping().contains(key));
+
+        let dm = if twice {
+            let mut transaction_accounts = transaction_accounts.clone();
+
+            transaction_accounts.iter_mut().for_each(|(_, acc)| {
+                acc.data = Arc::new(acc.data().to_vec());
+            });
+
+            let mut execute_timings = execute_timings.clone();
+            let mut error_metrics = error_metrics.clone();
+
+            let rent = environment
+                .rent_collector
+                .map(|rent_collector| rent_collector.rent.clone())
+                .unwrap_or_default();
+
+            let lamports_before_tx =
+                transaction_accounts_lamports_sum(&transaction_accounts, tx.message()).unwrap_or(0);
+
+            let compute_budget = config
+                .compute_budget
+                .unwrap_or_else(|| ComputeBudget::from(loaded_transaction.compute_budget_limits));
+
+            let mut transaction_context = TransactionContext::new(
+                transaction_accounts,
+                rent.clone(),
+                compute_budget.max_instruction_stack_depth,
+                compute_budget.max_instruction_trace_length,
+            );
+            #[cfg(debug_assertions)]
+            transaction_context.set_signature(tx.signature());
+
+            let pre_account_state_info =
+                TransactionAccountStateInfo::new(&rent, &transaction_context, tx.message());
+
+            let log_collector = if config.recording_config.enable_log_recording {
+                match config.log_messages_bytes_limit {
+                    None => Some(LogCollector::new_ref()),
+                    Some(log_messages_bytes_limit) => Some(LogCollector::new_ref_with_limit(Some(
+                        log_messages_bytes_limit,
+                    ))),
+                }
+            } else {
+                None
+            };
+
+            let blockhash = environment.blockhash;
+            let lamports_per_signature = environment.lamports_per_signature;
+
+            let mut executed_units = 0u64;
+            let sysvar_cache = &self.sysvar_cache.read().unwrap();
+
+            let mut invoke_context = InvokeContext::new(
+                &mut transaction_context,
+                program_cache_for_tx_batch,
+                EnvironmentConfig::new(
+                    blockhash,
+                    environment.epoch_total_stake,
+                    environment.epoch_vote_accounts,
+                    Arc::clone(&environment.feature_set),
+                    lamports_per_signature,
+                    sysvar_cache,
+                ),
+                log_collector.clone(),
+                compute_budget,
+            );
+
+            invoke_context.direct_mapping = true;
+
+            let mut process_message_time = Measure::start("process_message_time");
+            let process_result = MessageProcessor::process_message(
+                tx.message(),
+                &loaded_transaction.program_indices,
+                &mut invoke_context,
+                &mut execute_timings,
+                &mut executed_units,
+            );
+            process_message_time.stop();
+
+            let log_collector = invoke_context.get_log_collector().unwrap();
+
+            let logs = log_collector.borrow().messages.to_owned();
+
+            drop(invoke_context);
+
+            Some((transaction_context.accounts, logs, process_result))
+        } else {
+            None
+        };
+
         fn transaction_accounts_lamports_sum(
             accounts: &[(Pubkey, AccountSharedData)],
             message: &SanitizedMessage,
@@ -791,7 +886,53 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         );
         process_message_time.stop();
 
-        drop(invoke_context);
+        if let Some((dm_accounts, dm_logs, dm_result)) = dm {
+            let log_collector = invoke_context.get_log_collector().unwrap();
+
+            let log_collector = log_collector.borrow();
+
+            let logs = &log_collector.messages;
+
+            let logs_differ = logs.len() != dm_logs.len()
+                || logs
+                    .iter()
+                    .zip(dm_logs.iter())
+                    .any(|(dm, nondm)| dm != nondm);
+
+            let accounts_differ: Vec<_> = dm_accounts
+                .accounts
+                .iter()
+                .enumerate()
+                .zip(transaction_context.accounts.accounts.iter())
+                .filter_map(|((index, dm), nondm)| {
+                    let nondm = nondm.borrow();
+
+                    let dm = dm.borrow();
+                    if dm.data() != nondm.data()
+                        || dm.lamports() != nondm.lamports()
+                        || dm.owner() != nondm.owner()
+                    {
+                        Some(
+                            transaction_context
+                                .get_key_of_account_at_index(index as IndexOfAccount)
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !accounts_differ.is_empty() || logs_differ || dm_result != process_result {
+                println!("XXX FOUND ONE signature:{}", tx.signature());
+                println!("LOGS DM:\n{dm_logs:?}\nresult:{dm_result:?}");
+                println!("LOGS non-DM:\n{logs:?}\nresult:{process_result:?}");
+                for i in accounts_differ {
+                    println!("ACCOUNT {i} DIFFERENT");
+                }
+            }
+        }
+        //drop(invoke_context);
 
         saturating_add_assign!(
             execute_timings.execute_accessories.process_message_us,
