@@ -2875,6 +2875,7 @@ fn record_transactions(
                     let is_simple_vote_tx = tx.is_simple_vote_transaction();
 
                     TransactionDetails {
+                        signature: tx.signature().to_string(),
                         accounts,
                         instructions,
                         is_simple_vote_tx,

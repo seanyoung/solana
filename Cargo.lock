@@ -7497,6 +7497,7 @@ dependencies = [
  "solana-system-program",
  "solana-type-overrides",
  "solana-vote",
+ "solana_rbpf",
 ]
 
 [[package]]
@@ -8002,8 +8003,6 @@ dependencies = [
 [[package]]
 name = "solana_rbpf"
 version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff08afd63f70a1ba712fb0017be41e93b017f7e874785b54bb5ec9aa8949781d"
 dependencies = [
  "byteorder",
  "combine",

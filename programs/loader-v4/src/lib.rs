@@ -108,7 +108,8 @@ pub fn create_vm<'a, 'b>(
     invoke_context: &'a mut InvokeContext<'b>,
     program: &'a Executable<InvokeContext<'b>>,
 ) -> Result<EbpfVm<'a, InvokeContext<'b>>, Box<dyn std::error::Error>> {
-    let config = program.get_config();
+    let config = &invoke_context.config;
+    let config = unsafe { std::mem::transmute::<&Config, &'a Config>(config) };
     let sbpf_version = program.get_sbpf_version();
     let compute_budget = invoke_context.get_compute_budget();
     let heap_size = compute_budget.heap_size;
