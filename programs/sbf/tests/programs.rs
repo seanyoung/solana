@@ -3307,6 +3307,32 @@ fn test_program_sbf_realloc_invoke() {
     for i in 100..200 {
         assert_eq!(data[i], 2);
     }
+
+    // Test clearing of spare data
+    let invoke_account = AccountSharedData::new(42, 1000, &realloc_program_id);
+    bank.store_account(&invoke_pubkey, &invoke_account);
+    bank_client
+        .send_and_confirm_message(
+            signer,
+            Message::new(
+                &[
+                    Instruction::new_with_bytes(
+                        realloc_invoke_program_id,
+                        &[INVOKE_REALLOC_SPARE_ZERO],
+                        vec![
+                            AccountMeta::new(invoke_pubkey, false),
+                            AccountMeta::new_readonly(realloc_invoke_program_id, false),
+                            AccountMeta::new_readonly(realloc_program_id, false),
+                        ],
+                    ),
+                    ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(
+                        LOADED_ACCOUNTS_DATA_SIZE_LIMIT_FOR_TEST,
+                    ),
+                ],
+                Some(&mint_pubkey),
+            ),
+        )
+        .unwrap();
 }
 
 #[test]

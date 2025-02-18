@@ -326,6 +326,66 @@ fn process_instruction(
             )?;
             panic!("last invoke should fail");
         }
+        INVOKE_REALLOC_SPARE_ZERO => {
+            msg!("invoke invoke max twice");
+
+            // resize to 500 so we have 500 spare
+            account.realloc(500, false)?;
+
+            invoke(
+                &Instruction::new_with_bytes(
+                    *program_id,
+                    &[INVOKE_REALLOC_SPARE_ZERO_RECURSE],
+                    vec![
+                        AccountMeta::new(*accounts[0].key, false),
+                        AccountMeta::new_readonly(*accounts[1].key, false),
+                    ],
+                ),
+                accounts,
+            )?;
+
+            // check that spare area is zero
+            let data = account.data.borrow().as_ptr();
+
+            let spare = unsafe { std::slice::from_raw_parts(data.offset(500), 500) };
+
+            assert!(spare.iter().all(|x| *x == 0));
+        }
+        INVOKE_REALLOC_SPARE_ZERO_RECURSE => {
+            // resize to 2000 so we force a realloc (spare=0)
+            account.realloc(2000, false)?;
+
+            // make sure the realloc happens *now*
+            invoke(
+                &Instruction::new_with_bytes(
+                    *program_id,
+                    &[INVOKE_REALLOC_NOP],
+                    vec![
+                        AccountMeta::new(*accounts[0].key, false),
+                        AccountMeta::new_readonly(*accounts[1].key, false),
+                    ],
+                ),
+                accounts,
+            )?;
+
+            // decrease to 500 (spare=0)
+            account.realloc(500, false)?;
+
+            // make sure the resize happens *now*
+            // TODO is this required
+            invoke(
+                &Instruction::new_with_bytes(
+                    *program_id,
+                    &[INVOKE_REALLOC_NOP],
+                    vec![
+                        AccountMeta::new(*accounts[0].key, false),
+                        AccountMeta::new_readonly(*accounts[1].key, false),
+                    ],
+                ),
+                accounts,
+            )?;
+        }
+        INVOKE_REALLOC_NOP => {}
         _ => panic!(),
     }
 
