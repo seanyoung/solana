@@ -353,7 +353,7 @@ smallvec = "1.14.0"
 smpl_jwt = "0.7.1"
 socket2 = "0.5.8"
 soketto = "0.7"
-solana-account = "=2.2.1"
+solana-account = { path = "/home/sean/git/solana-sdk/account" }
 solana-account-decoder = { path = "account-decoder", version = "=2.3.0" }
 solana-account-decoder-client-types = { path = "account-decoder-client-types", version = "=2.3.0" }
 solana-account-info = "=2.2.1"
@@ -384,7 +384,7 @@ solana-cli-config = { path = "cli-config", version = "=2.3.0" }
 solana-cli-output = { path = "cli-output", version = "=2.3.0" }
 solana-client = { path = "client", version = "=2.3.0" }
 solana-client-traits = "=2.2.1"
-solana-clock = "=2.2.1"
+solana-clock = { path = "/home/sean/git/solana-sdk/clock" }
 solana-cluster-type = "=2.2.1"
 solana-commitment-config = "=2.2.1"
 solana-compute-budget = { path = "compute-budget", version = "=2.3.0" }
@@ -529,11 +529,11 @@ solana-svm-transaction = { path = "svm-transaction", version = "=2.3.0" }
 solana-system-interface = "1.0"
 solana-system-program = { path = "programs/system", version = "=2.3.0" }
 solana-system-transaction = "=2.2.1"
-solana-sysvar = "=2.2.1"
-solana-sysvar-id = "=2.2.1"
+solana-sysvar = { path = "/home/sean/git/solana-sdk/sysvar" }
+solana-sysvar-id = { path = "/home/sean/git/solana-sdk/sysvar-id" }
 solana-test-validator = { path = "test-validator", version = "=2.3.0" }
 solana-thin-client = { path = "thin-client", version = "=2.3.0" }
-solana-transaction = "=2.2.1"
+solana-transaction = { path = "/home/sean/git/solana-sdk/transaction" }
 solana-transaction-error = "=2.2.1"
 solana-tpu-client = { path = "tpu-client", version = "=2.3.0", default-features = false }
 solana-tpu-client-next = { path = "tpu-client-next", version = "=2.3.0" }
