@@ -5719,6 +5719,7 @@ dependencies = [
  "solana-compute-budget",
  "solana-curve25519",
  "solana-measure",
+ "solana-metrics",
  "solana-poseidon",
  "solana-program-runtime",
  "solana-sdk",
